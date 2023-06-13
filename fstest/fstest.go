@@ -147,7 +147,7 @@ func (i *Item) CheckHashes(t *testing.T, obj fs.Object) {
 // Check checks all the attributes of the object are correct
 func (i *Item) Check(t *testing.T, obj fs.Object, precision time.Duration) {
 	i.CheckHashes(t, obj)
-	assert.Equal(t, i.Size, obj.Size(), fmt.Sprintf("%s: size incorrect file=%d vs obj=%d", i.Path, i.Size, obj.Size()))
+	assert.Equal(t, i.Size, obj.Size(), fmt.Sprintf("%s: size incorrect file=%d vs obj=%d", i.Path, i.Size, obj.Size())) // FIXME: check note at Size() impl
 	i.CheckModTime(t, obj, obj.ModTime(context.Background()), precision)
 }
 
@@ -213,7 +213,7 @@ func makeListingFromItems(items []Item) string {
 	nameLengths := make([]string, len(items))
 	for i, item := range items {
 		remote := Normalize(item.Path)
-		nameLengths[i] = fmt.Sprintf("%s (%d)", remote, item.Size)
+		nameLengths[i] = fmt.Sprintf("%s (%d)", remote, item.Size) // FIXME: size issue, see Size()
 	}
 	sort.Strings(nameLengths)
 	return strings.Join(nameLengths, ", ")
@@ -223,7 +223,7 @@ func makeListingFromItems(items []Item) string {
 func makeListingFromObjects(objs []fs.Object) string {
 	nameLengths := make([]string, len(objs))
 	for i, obj := range objs {
-		nameLengths[i] = fmt.Sprintf("%s (%d)", Normalize(obj.Remote()), obj.Size())
+		nameLengths[i] = fmt.Sprintf("%s (%d)", Normalize(obj.Remote()), obj.Size()) // FIXME: size issue, see Size()
 	}
 	sort.Strings(nameLengths)
 	return strings.Join(nameLengths, ", ")
@@ -283,6 +283,7 @@ func CheckListingWithRoot(t *testing.T, f fs.Fs, dir string, items []Item, expec
 		}
 
 		gotListing = makeListingFromObjects(objs)
+
 		listingOK = wantListing == gotListing
 		if listingOK && (expectedDirs == nil || len(dirs) == len(expectedDirs)) {
 			// Put an extra sleep in if we did any retries just to make sure it really
