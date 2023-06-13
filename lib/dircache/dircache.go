@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path"
 	"strings"
 	"sync"
@@ -196,6 +197,7 @@ func SplitPath(path string) (directory, leaf string) {
 //
 // It will call FindRoot if it hasn't been called already
 func (dc *DirCache) FindDir(ctx context.Context, path string, create bool) (pathID string, err error) {
+	log.Println("FindDir path", path)
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	err = dc._findRoot(ctx, create)
