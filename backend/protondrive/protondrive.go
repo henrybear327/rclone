@@ -3,8 +3,6 @@ package protondrive
 /*
 TODO:
 	- address all integration issues
-		- (azim) encoding: check the usage of f.opt.Enc.FromStandardName() from other backends
-			- since Proton drive encrypts the file and folder names, can we just keep the file and folder name as is?
 		- (azim) put: NewObject init, uploading issues, etc.
 	- check mega, amazoncloud, (etc.) to see if the implementation of the code is making sense
 	- write the documentation
@@ -25,6 +23,7 @@ Notes:
 	- dir/remote/etc. is the relative path from f.root
 	- FindDir operates on absolute path
 	- for ProtonDrive apis, the path being operated should always be full path (fs.root + remote)
+	- we will use the encoder by default to deal with invalid utf8
 
 Not yet implemented but on the roadmap (most likely V2 from the bridging library):
 	- 2Password mode
@@ -228,7 +227,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		return nil, err
 	}
 
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
+	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -305,8 +304,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 
 	entries := make(fs.DirEntries, 0)
 	for i := range foldersAndFiles {
-		// remote := path.Join(dir, f.opt.Enc.FromStandardName(foldersAndFiles[i].Name))
-		remote := path.Join(dir, foldersAndFiles[i].Name)
+		remote := path.Join(dir, f.opt.Enc.ToStandardName(foldersAndFiles[i].Name))
 
 		if foldersAndFiles[i].IsFolder {
 			d := fs.NewDir(remote, time.Unix(foldersAndFiles[i].Link.ModifyTime, 0)).SetID(foldersAndFiles[i].Link.LinkID)
@@ -329,7 +327,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 // dircache package when appropriate.
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true)
+	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, f.opt.Enc.FromStandardName(leaf), false, true)
 	if err != nil {
 		return "", false, err
 	}
@@ -342,7 +340,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	return f.protonDrive.CreateNewFolderByID(ctx, pathID, leaf)
+	return f.protonDrive.CreateNewFolderByID(ctx, pathID, f.opt.Enc.FromStandardName(leaf))
 }
 
 // Put in to the remote path with the modTime given of the given size
@@ -570,7 +568,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	modTime := src.ModTime(ctx)
-	link, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in)
+	link, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, o.fs.opt.Enc.FromStandardName(leaf), modTime, in)
 	if err != nil {
 		return err
 	}
