@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 	"time"
 
 	protonDriveAPI "github.com/henrybear327/Proton-API-Bridge"
@@ -220,7 +221,6 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 // it returns the error fs.ErrorObjectNotFound.
 // TODO: implement me properly
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
-	// remote = f.opt.Enc.FromStandardPath(remote)
 	fullpath := path.Join(f.root, remote)
 	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, fullpath, false)
 	if err != nil {
@@ -229,6 +229,9 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
 	if err != nil {
+		if strings.Contains(err.Error(), "(Code=2501, Status=422)") {
+			return nil, fs.ErrorObjectNotFound
+		}
 		return nil, err
 	}
 	if link == nil {
