@@ -224,6 +224,9 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	fullpath := path.Join(f.root, remote)
 	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, fullpath, false)
 	if err != nil {
+		if err == fs.ErrorDirNotFound {
+			return nil, fs.ErrorObjectNotFound
+		}
 		return nil, err
 	}
 
@@ -457,7 +460,8 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 
 // Precision of the ModTimes in this Fs
 func (f *Fs) Precision() time.Duration {
-	return time.Second * 10 // FIXME: reduce this when we fix proton-go-api
+	return fs.ModTimeNotSupported
+	// return time.Second * 10 // FIXME
 }
 
 // DirCacheFlush an optional interface to flush internal directory cache
