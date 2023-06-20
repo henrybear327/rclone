@@ -1,53 +1,38 @@
 package protondrive
 
 /*
-	TODO:
-	- run the unit test and start fixing bugs (test account)
-		- encoding: check usage of f.opt.Enc.FromStandardName(leaf) -> do we need it for Proton Drive? since it will drastically change the filename
-		- rmdir: root directory handling
-		- put: NewObject init, etc. needs to be checked
+TODO:
+	- address all integration issues
+		- (azim) encoding: check the usage of f.opt.Enc.FromStandardName() from other backends
+			- since Proton drive encrypts the file and folder names, can we just keep the file and folder name as is?
+		- (azim) put: NewObject init, uploading issues, etc.
 	- check mega, amazoncloud, (etc.) to see if the implementation of the code is making sense
 	- write the documentation
-	- address all FIXME -> I think the way I handle remote is wrong
-	- Size() is reported after the size after encryption
-	- ModTime difference is too big because of encryption, too
+	- address all FIXME
+	- Size() is reported after the size after encryption: solution: add an option to signal it's in the integration mode -> decrypt before returning the size
+	- ModTime difference is too big because of encryption -> precision is now 10s
 
-	Timeline:
-	- send over by ZIP to azim the code
-	- squash the proton-api-bridge and release it
-	- squaqsh the current rclone branch and release it
-	- create a PR on rclone and re-open the issue
-
-	TODO: Implement Features (V2)
-	- Move
-	- DirMove
-	- UserInfo
-	- Disconnect
-
-	TODO: optimization
+TODO: optimization
 	- linkID to link node caching
 	- remove e.g. proton.link exposure
 	- utilize pacer (although proton-go-api reacts to 429, we would probably not want to trigger that)
-*/
 
-/*
-Questions:
-	- remote == full path separated by /?
-	- Do we need to impl FindRoot?
-	- (V) FIXME: FindDir vs Get -> fs.ErrorDirNotFound
 Notes:
 	- objects are files
 	- directories are folders
 	- root is ""
-	- f.root is the absolute path from root, dir/remote/etc. is the relative path from f.root
-	- FindDir operates on relative path
+	- f.root is the absolute path from root,
+	- dir/remote/etc. is the relative path from f.root
+	- FindDir operates on absolute path
 	- for ProtonDrive apis, the path being operated should always be full path (fs.root + remote)
 
 Not yet implemented but on the roadmap (most likely V2 from the bridging library):
 	- 2Password mode
 	- Thumbnail support
 	- Optimized download and upload
-
+	- Move, DirMove
+	- UserInfo
+	- Disconnect
 
 Not implemented:
 - type Directory interface
@@ -59,7 +44,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"path"
 	"time"
 
@@ -86,7 +70,6 @@ const (
 var (
 	ErrMissingLinkObject               = errors.New("link object must not be nil")
 	ErrCanNotUploadFileWithUnknownSize = errors.New("proton Drive can't upload files with unknown size")
-	ErrCanNotRemoveRootDirectory       = errors.New("can't remove root directory")
 )
 
 // Register with Fs
@@ -214,18 +197,15 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	f.protonDrive = protonDrive
 
-	// FIXME: check if the root remote exists, if not we create one (should we?)
-	// FIXME: check if the root remote is a file (how to handle this?)
-	rootFolderLinkID, err := protonDrive.CreateNewFolderByID(ctx, protonDrive.MainShare.LinkID, root) // f.mkdirParent(ctx, root) /* Can't do so since root path is not yet initialized */
+	f.dirCache = dircache.New(
+		root,                         /* root folder path */
+		protonDrive.MainShare.LinkID, /* real root ID is the root folder, since we can't go past this folder */
+		f,
+	)
+	err = f.dirCache.FindRoot(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't initialize a new root remote: %w", err)
 	}
-	log.Println("rootFolderLinkID", rootFolderLinkID)
-	f.dirCache = dircache.New(
-		"",               /* root folder path */
-		rootFolderLinkID, /* real root ID is the root folder, since we can't go past this folder */
-		f,
-	)
 
 	return f, nil
 }
@@ -242,8 +222,8 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 // TODO: implement me properly
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	// remote = f.opt.Enc.FromStandardPath(remote)
-	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, remote, false)
-	log.Println("NewObject", folderLinkID, leaf)
+	fullpath := path.Join(f.root, remote)
+	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, fullpath, false)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +292,8 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, link *proton.
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	fullpath := path.Join(f.root, dir)
+	folderLinkID, err := f.dirCache.FindDir(ctx, fullpath, false)
 	if err != nil {
 		return nil, err
 	}
@@ -321,8 +302,6 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	log.Printf("List %v %v", dir, folderLinkID)
 
 	entries := make(fs.DirEntries, 0)
 	for i := range foldersAndFiles {
@@ -339,8 +318,6 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 			}
 			entries = append(entries, obj)
 		}
-
-		log.Printf("List entry %v %v %v %v", i, remote, foldersAndFiles[i].Link.LinkID, foldersAndFiles[i].Name)
 	}
 
 	return entries, nil
@@ -352,8 +329,6 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 // dircache package when appropriate.
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	log.Println("FindLeaf", pathID, leaf)
-
 	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true)
 	if err != nil {
 		return "", false, err
@@ -367,7 +342,6 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	log.Println("CreateDir", pathID, leaf)
 	return f.protonDrive.CreateNewFolderByID(ctx, pathID, leaf)
 }
 
@@ -382,25 +356,19 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // nil and the error
 // TODO: implement me properly
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	log.Println("Put called", src.ModTime(ctx), options)
-
 	size := src.Size()
 	if size < 0 {
-		log.Println("Can't upload becasue size unknown")
 		return nil, ErrCanNotUploadFileWithUnknownSize
 	}
 
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
-		log.Println("Object exists for put")
 		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
 		// Not found so create it
-		log.Println("Object doesn't exists for put")
 		return f.PutUnchecked(ctx, in, src)
 	default:
-		log.Println("NewObject err", err)
 		return nil, err
 	}
 }
@@ -417,7 +385,8 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	//      ^~~~~~~~~~~^ dirPath
 	// dirPath, _ /* filename: not used, as we care about only the parent folders */ := path.Split(remote)
 
-	_, _, err := f.dirCache.FindPath(ctx, remote, true)
+	fullpath := path.Join(f.root, remote)
+	_, _, err := f.dirCache.FindPath(ctx, fullpath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -459,8 +428,8 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 //
 // Shouldn't return an error if it already exists
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
-	_, err := f.dirCache.FindDir(ctx, dir, true)
-	// FIXME: ignore the err if it's folder alreay exists
+	fullpath := path.Join(f.root, dir)
+	_, err := f.dirCache.FindDir(ctx, fullpath, true)
 	return err
 }
 
@@ -468,13 +437,8 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	if dir == "" {
-		// FIXME: we don't allow removing the root directory that is currently being mounted
-		// But the unit test states otherwise
-		return ErrCanNotRemoveRootDirectory
-	}
-
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	fullpath := path.Join(f.root, dir)
+	folderLinkID, err := f.dirCache.FindDir(ctx, fullpath, false)
 	if err == fs.ErrorDirNotFound {
 		return fmt.Errorf("cannot find LinkID for dir %s", dir)
 	} else if err != nil {
@@ -486,7 +450,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 		return err
 	}
 
-	f.dirCache.FlushDir(dir)
+	f.dirCache.FlushDir(fullpath)
 	return nil
 }
 
@@ -593,15 +557,14 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 // return an error or update the object properly (rather than e.g. calling panic).
 // TODO: implement me properly
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	log.Println("Update", src, options)
-
 	size := src.Size()
 	if size < 0 {
 		return ErrCanNotUploadFileWithUnknownSize
 	}
 
 	remote := o.Remote()
-	leaf, folderLinkID, err := o.fs.dirCache.FindPath(ctx, remote, true)
+	fullpath := path.Join(o.fs.root, remote)
+	leaf, folderLinkID, err := o.fs.dirCache.FindPath(ctx, fullpath, true)
 	if err != nil {
 		return fmt.Errorf("update make parent dir failed: %w", err)
 	}
@@ -634,7 +597,8 @@ func (o *Object) ID() string {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	fullpath := path.Join(f.root, dir)
+	folderLinkID, err := f.dirCache.FindDir(ctx, fullpath, false)
 	if err == fs.ErrorDirNotFound {
 		return fmt.Errorf("cannot find LinkID for dir %s", dir)
 	} else if err != nil {
@@ -646,7 +610,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 		return err
 	}
 
-	f.dirCache.FlushDir(dir)
+	f.dirCache.FlushDir(fullpath)
 	return nil
 }
 

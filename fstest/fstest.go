@@ -286,11 +286,11 @@ func CheckListingWithRoot(t *testing.T, f fs.Fs, dir string, items []Item, expec
 
 		gotListing = makeListingFromObjects(objs)
 
-		log.Printf("objs %#v", objs)
-		log.Printf("wantListing %#v", wantListing)
-		log.Printf("gotListing %#v", gotListing)
-		log.Printf("dirs %#v", dirs)
-		log.Printf("expectedDirs %#v", expectedDirs)
+		// log.Printf("objs %#v", objs)
+		// log.Printf("wantListing %#v", wantListing)
+		// log.Printf("gotListing %#v", gotListing)
+		// log.Printf("dirs %#v", dirs)
+		// log.Printf("expectedDirs %#v", expectedDirs)
 
 		listingOK = wantListing == gotListing
 		if listingOK && (expectedDirs == nil || len(dirs) == len(expectedDirs)) {
