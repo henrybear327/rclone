@@ -43,6 +43,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"strings"
 	"time"
@@ -98,16 +99,23 @@ func init() {
 			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
 			Default: (encoder.Base |
 				encoder.EncodeInvalidUtf8),
+		}, {
+			Name:     "reportorginalsize",
+			Help:     "The default size returned will be the size on the proton drive (after encryption), but for unit / integration tests, we need to obtain the original content size. Set to true, will return the original content size, but, it will have performance and network implications, since decryption will be performed",
+			Advanced: true,
+			Default:  false,
 		}},
 	})
 }
 
 // Options defines the configuration for this backend
 type Options struct {
-	Username string               `config:"username"`
-	Password string               `config:"password"`
-	TwoFA    string               `config:"2fa"`
-	Enc      encoder.MultiEncoder `config:"encoding"`
+	Username string `config:"username"`
+	Password string `config:"password"`
+	TwoFA    string `config:"2fa"`
+	// advance
+	Enc                encoder.MultiEncoder `config:"encoding"`
+	ReportOriginalSize bool                 `config:"reportorginalsize"`
 }
 
 // Fs represents a remote proton drive
@@ -124,14 +132,16 @@ type Fs struct {
 
 // Object describes an object
 type Object struct {
-	fs          *Fs       // what this object is part of
-	remote      string    // The remote path (relative to the fs.root)
-	size        int64     // size of the object
-	modTime     time.Time // modification time of the object
-	createdTime time.Time
-	id          string // ID of the object
-	data        []byte // decrypted file byte array
-	mimetype    string // mimetype of the file
+	fs           *Fs       // what this object is part of
+	remote       string    // The remote path (relative to the fs.root)
+	size         int64     // size of the object (on server, after encryption)
+	originalSize *int64    // size of the object (after decryption)
+	modTime      time.Time // modification time of the object
+	createdTime  time.Time
+	id           string // ID of the object
+	data         []byte // decrypted file byte array
+	mimetype     string // mimetype of the file
+	// TODO: cache the link
 }
 
 //------------------------------------------------------------------------------
@@ -207,6 +217,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	)
 	err = f.dirCache.FindRoot(ctx, false)
 	if err != nil {
+		log.Println("FindRoot err", err)
 		if err != fs.ErrorDirNotFound {
 			return nil, fmt.Errorf("couldn't initialize a new root remote: %w", err)
 		}
@@ -248,13 +259,14 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	}
 
 	o := &Object{
-		fs:       f,
-		remote:   remote,
-		size:     link.Size,
-		id:       link.LinkID,
-		data:     nil,
-		mimetype: link.MIMEType,
-		modTime:  time.Unix(link.ModifyTime, 0),
+		fs:           f,
+		remote:       remote,
+		size:         link.Size,
+		originalSize: nil,
+		id:           link.LinkID,
+		data:         nil,
+		mimetype:     link.MIMEType,
+		modTime:      time.Unix(link.ModifyTime, 0),
 	}
 
 	return o, nil
@@ -401,13 +413,14 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 
 	// Temporary Object under construction
 	obj := &Object{
-		fs:       f,
-		remote:   remote,
-		size:     size,
-		id:       "",
-		modTime:  modTime,
-		data:     nil,
-		mimetype: "",
+		fs:           f,
+		remote:       remote,
+		size:         size,
+		originalSize: nil,
+		id:           "",
+		modTime:      modTime,
+		data:         nil,
+		mimetype:     "",
 	}
 	return obj, nil
 }
@@ -525,7 +538,22 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 
 // Size returns the size of an object in bytes
 func (o *Object) Size() int64 {
-	// FIXME: due to encryption, the size() returned is not the orignal size :(
+	if o.fs.opt.ReportOriginalSize {
+		// This option is for unit / integration test only
+		// DO NOT USE IN PRODUCTION
+		if o.originalSize != nil {
+			return *o.originalSize
+		}
+
+		_, err := o.Open(context.Background(), nil)
+		if err != nil {
+			log.Fatalln("Size Open err", err)
+		}
+
+		if o.originalSize != nil {
+			return *o.originalSize
+		}
+	}
 	return o.size
 }
 
@@ -553,8 +581,11 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 	if err != nil {
 		return nil, err
 	}
+	o.data = data
+	originalSize := int64(len(o.data))
+	o.originalSize = &originalSize
 
-	return io.NopCloser(bytes.NewReader(data)), nil
+	return io.NopCloser(bytes.NewReader(o.data)), nil
 }
 
 // Update in to the object with the modTime given of the given size
@@ -576,10 +607,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	modTime := src.ModTime(ctx)
-	link, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, o.fs.opt.Enc.FromStandardName(leaf), modTime, in)
+	link, originalSize, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, o.fs.opt.Enc.FromStandardName(leaf), modTime, in)
 	if err != nil {
 		return err
 	}
+	o.originalSize = &originalSize
 
 	// FIXME: verify upload (by looking at the size?)
 
@@ -604,9 +636,7 @@ func (o *Object) ID() string {
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
 	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
-	if err == fs.ErrorDirNotFound {
-		return fmt.Errorf("[Purge] cannot find LinkID for dir %s", dir)
-	} else if err != nil {
+	if err != nil {
 		return err
 	}
 
