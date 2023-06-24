@@ -617,6 +617,11 @@ func (o *Object) MimeType(ctx context.Context) string {
 	return o.mimetype
 }
 
+// Disconnect the current user
+func (f *Fs) Disconnect(ctx context.Context) error {
+	return f.protonDrive.Logout(ctx)
+}
+
 // Move src to this remote using server-side move operations.
 //
 // # This is stored with the remote path given
