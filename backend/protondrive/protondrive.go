@@ -34,6 +34,7 @@ const (
 var (
 	ErrMissingLinkObject               = errors.New("link object must not be nil")
 	ErrCanNotUploadFileWithUnknownSize = errors.New("proton Drive can't upload files with unknown size")
+	ErrCanNotPurgeRootDirectory        = errors.New("can't purge root directory")
 )
 
 // Register with Fs
@@ -100,10 +101,12 @@ type Object struct {
 	size         int64     // size of the object (on server, after encryption)
 	originalSize *int64    // size of the object (after decryption)
 	modTime      time.Time // modification time of the object
-	createdTime  time.Time
-	id           string // ID of the object
-	data         []byte // decrypted file byte array
-	mimetype     string // mimetype of the file
+	createdTime  time.Time // creation time of the object
+	id           string    // ID of the object
+	data         []byte    // decrypted file byte array
+	mimetype     string    // mimetype of the file
+
+	link *proton.Link // link data on proton server
 }
 
 //------------------------------------------------------------------------------
@@ -205,6 +208,28 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 // ErrorIsDir if possible without doing any extra work,
 // otherwise ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	return f.newObjectWithLink(ctx, remote, nil)
+}
+
+func (o *Object) setMetaData(link *proton.Link) error {
+	if link == nil {
+		return ErrMissingLinkObject
+	}
+
+	o.id = link.LinkID
+	o.size = link.Size
+	o.modTime = time.Unix(link.ModifyTime, 0)
+	o.createdTime = time.Unix(link.CreateTime, 0)
+	o.data = nil
+	o.mimetype = link.MIMEType
+	o.link = link
+	// intentionally not touch o.originalSize since it might be updated elsewhere
+
+	return nil
+}
+
+// readMetaDataForRemote reads the metadata from the remote
+func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string) (*proton.Link, error) {
 	if _, err := f.dirCache.FindDir(ctx, remote, false); err != nil {
 		if err != fs.ErrorDirNotFound {
 			// a real error is found
@@ -235,50 +260,41 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		return nil, fs.ErrorObjectNotFound
 	}
 
-	o := &Object{
-		fs:           f,
-		remote:       remote,
-		size:         link.Size,
-		originalSize: nil,
-		id:           link.LinkID,
-		data:         nil,
-		mimetype:     link.MIMEType,
-		modTime:      time.Unix(link.ModifyTime, 0),
-	}
-
-	return o, nil
+	return link, nil
 }
 
-func (o *Object) setMetaData(link *proton.Link) error {
-	o.id = link.LinkID
-	o.size = link.Size
-	o.modTime = time.Unix(link.ModifyTime, 0)
-	o.createdTime = time.Unix(link.CreateTime, 0)
-	o.data = nil
-	o.mimetype = link.MIMEType
+// readMetaData gets the metadata if it hasn't already been fetched
+//
+// it also sets the info
+func (o *Object) readMetaData(ctx context.Context) (err error) {
+	if o.link != nil {
+		return nil
+	}
 
-	return nil
+	link, err := o.fs.readMetaDataForRemote(ctx, o.remote)
+	if err != nil {
+		return err
+	}
+	return o.setMetaData(link)
 }
 
 // Return an Object from a path
 //
 // If it can't be found it returns the error fs.ErrorObjectNotFound.
-func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, link *proton.Link) (fs.Object, error) {
+func (f *Fs) newObjectWithLink(ctx context.Context, remote string, link *proton.Link) (fs.Object, error) {
 	o := &Object{
 		fs:     f,
 		remote: remote,
 	}
-
 	var err error
 	if link != nil {
-		err = o.setMetaData(link) // Set info
+		err = o.setMetaData(link)
 	} else {
-		return nil, ErrMissingLinkObject
+		err = o.readMetaData(ctx)
 	}
 	if err != nil {
 		return nil, err
 	}
-
 	return o, nil
 }
 
@@ -292,7 +308,7 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, link *proton.
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false) // will handle ErrDirNotFound here
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +326,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 			d := fs.NewDir(remote, time.Unix(foldersAndFiles[i].Link.ModifyTime, 0)).SetID(foldersAndFiles[i].Link.LinkID)
 			entries = append(entries, d)
 		} else {
-			obj, err := f.newObjectWithInfo(ctx, remote, foldersAndFiles[i].Link)
+			obj, err := f.newObjectWithLink(ctx, remote, foldersAndFiles[i].Link)
 			if err != nil {
 				return nil, err
 			}
@@ -352,7 +368,6 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // May create the object even if it returns an error - if so
 // will return the object and the error, otherwise will return
 // nil and the error
-// TODO: implement me properly
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	size := src.Size()
 	if size < 0 {
@@ -362,11 +377,13 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
+		// object is found
 		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
-		// Not found so create it
+		// object not found, so we need to create it
 		return f.PutUnchecked(ctx, in, src)
 	default:
+		// real error caught
 		return nil, err
 	}
 }
@@ -374,15 +391,15 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 // Creates from the parameters passed in a half finished Object which
 // must have setMetaData called on it
 //
-// # The parent folders will be checked, if missing, created upon traversal check
+// Returns the object, leaf, directoryID and error.
 //
 // Used to create new objects
 func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time, size int64) (*Object, error) {
 	//                 ˇ-------ˇ filename
 	// e.g. /root/a/b/c/test.txt
 	//      ^~~~~~~~~~~^ dirPath
-	// dirPath, _ /* filename: not used, as we care about only the parent folders */ := path.Split(remote)
 
+	// Create the directory for the object if it doesn't exist
 	_, _, err := f.dirCache.FindPath(ctx, remote, true)
 	if err != nil {
 		return nil, err
@@ -398,6 +415,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		modTime:      modTime,
 		data:         nil,
 		mimetype:     "",
+		link:         nil,
 	}
 	return obj, nil
 }
@@ -569,7 +587,6 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 // When called from outside an Fs by rclone, src.Size() will always be >= 0.
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
-// TODO: implement me properly
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
 	size := src.Size()
 	if size < 0 {
@@ -579,7 +596,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	remote := o.Remote()
 	leaf, folderLinkID, err := o.fs.dirCache.FindPath(ctx, remote, true)
 	if err != nil {
-		return fmt.Errorf("update make parent dir failed: %w", err)
+		return err
 	}
 
 	modTime := src.ModTime(ctx)
@@ -588,8 +605,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 	o.originalSize = &originalSize
-
-	// FIXME: verify upload (by looking at the size?)
 
 	return o.setMetaData(link)
 }
@@ -611,6 +626,12 @@ func (o *Object) ID() string {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
+	root := path.Join(f.root, dir)
+	if root == "" {
+		// TODO: we can't remove the root directory, but we can list the directory and delete every folder and file in here
+		return ErrCanNotPurgeRootDirectory
+	}
+
 	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return err
