@@ -1,42 +1,5 @@
 package protondrive
 
-/*
-TODO:
-	- address all integration issues
-		- (azim) put: NewObject init, uploading issues, etc.
-	- check mega, amazoncloud, (etc.) to see if the implementation of the code is making sense
-	- write the documentation
-	- address all FIXME
-	- Size() is reported after the size after encryption: solution: add an option to signal it's in the integration mode -> decrypt before returning the size
-	- ModTime difference is too big because of encryption -> precision is now 10s
-
-TODO: optimization
-	- linkID to link node caching
-	- remove e.g. proton.link exposure
-	- utilize pacer (although proton-go-api reacts to 429, we would probably not want to trigger that)
-
-Notes:
-	- objects are files
-	- directories are folders
-	- root is ""
-	- f.root is the absolute path from root,
-	- dir/remote/etc. is the relative path from f.root
-	- FindDir operates on relative path
-	- for ProtonDrive apis, the path being operated should always be full path (fs.root + remote)
-	- we will use the encoder by default to deal with invalid utf8
-
-Not yet implemented but on the roadmap (most likely V2 from the bridging library):
-	- 2Password mode
-	- Thumbnail support
-	- Optimized download and upload
-	- Move, DirMove
-	- UserInfo
-	- Disconnect
-
-Not implemented:
-- type Directory interface
-*/
-
 import (
 	"bytes"
 	"context"
