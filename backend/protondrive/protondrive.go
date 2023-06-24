@@ -104,7 +104,6 @@ type Object struct {
 	id           string // ID of the object
 	data         []byte // decrypted file byte array
 	mimetype     string // mimetype of the file
-	// TODO: cache the link
 }
 
 //------------------------------------------------------------------------------
@@ -180,7 +179,8 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	)
 	err = f.dirCache.FindRoot(ctx, false)
 	if err != nil {
-		log.Println("FindRoot err", err)
+		// if the root directory is not found, the initialization will still work
+		// but if it's other kinds of error, then we raise it
 		if err != fs.ErrorDirNotFound {
 			return nil, fmt.Errorf("couldn't initialize a new root remote: %w", err)
 		}
@@ -199,25 +199,39 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 }
 
 // NewObject finds the Object at remote.  If it can't be found
-// it returns the error fs.ErrorObjectNotFound.
-// TODO: implement me properly
+// it returns the error ErrorObjectNotFound.
+//
+// If remote points to a directory then it should return
+// ErrorIsDir if possible without doing any extra work,
+// otherwise ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	if _, err := f.dirCache.FindDir(ctx, remote, false); err != nil {
+		if err != fs.ErrorDirNotFound {
+			// a real error is found
+			return nil, err
+		}
+		// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder
+	} else {
+		// a folder is found, the remote is not a path to file
+		return nil, fs.ErrorIsDir
+	}
+
+	// attempt to locate the file
 	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, remote, false)
 	if err != nil {
 		if err == fs.ErrorDirNotFound {
+			// parent folder of the file not found, we for sure can't find the file
 			return nil, fs.ErrorObjectNotFound
 		}
+		// other error has occurred
 		return nil, err
 	}
 
 	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
 	if err != nil {
-		if strings.Contains(err.Error(), "(Code=2501, Status=422)") {
-			return nil, fs.ErrorObjectNotFound
-		}
 		return nil, err
 	}
-	if link == nil {
+	if link == nil { // both link and err are nil, file not found
 		return nil, fs.ErrorObjectNotFound
 	}
 
@@ -439,7 +453,6 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 // Precision of the ModTimes in this Fs
 func (f *Fs) Precision() time.Duration {
 	return fs.ModTimeNotSupported
-	// return time.Second * 10 // FIXME
 }
 
 // DirCacheFlush an optional interface to flush internal directory cache
