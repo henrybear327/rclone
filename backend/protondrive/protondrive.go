@@ -188,7 +188,33 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			return nil, fmt.Errorf("couldn't initialize a new root remote: %w", err)
 		}
 
-		// TODO: assume this is a file path (check code from box.go)
+		// Assume it is a file (taken and modified from box.go)
+		newRoot, remote := dircache.SplitPath(root)
+		tempF := *f
+		tempF.dirCache = dircache.New(newRoot, protonDrive.MainShare.LinkID, &tempF)
+		tempF.root = newRoot
+		// Make new Fs which is the parent
+		err = tempF.dirCache.FindRoot(ctx, false)
+		if err != nil {
+			// No root so return old f
+			return f, nil
+		}
+		_, err := tempF.newObjectWithLink(ctx, remote, nil)
+		if err != nil {
+			if err == fs.ErrorObjectNotFound {
+				// File doesn't exist so return old f
+				return f, nil
+			}
+			return nil, err
+		}
+		f.features.Fill(ctx, &tempF)
+		// XXX: update the old f here instead of returning tempF, since
+		// `features` were already filled with functions having *f as a receiver.
+		// See https://github.com/rclone/rclone/issues/2182
+		f.dirCache = tempF.dirCache
+		f.root = tempF.root
+		// return an error with an fs which points to the parent
+		return f, fs.ErrorIsFile
 	}
 
 	return f, nil
