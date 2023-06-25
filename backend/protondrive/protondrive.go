@@ -722,7 +722,23 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
-	return fs.ErrorCantDirMove
+	srcFs, ok := src.(*Fs)
+	if !ok {
+		fs.Debugf(srcFs, "Can't move directory - not same remote type")
+		return fs.ErrorCantDirMove
+	}
+
+	srcID, _, _, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
+	if err != nil {
+		return err
+	}
+
+	err = f.protonDrive.MoveFolderByID(ctx, srcID, dstDirectoryID, dstLeaf)
+	if err != nil {
+		return err
+	}
+	srcFs.dirCache.FlushDir(srcRemote)
+	return nil
 }
 
 // Check the interfaces are satisfied
