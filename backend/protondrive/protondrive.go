@@ -23,6 +23,7 @@ import (
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
+	"github.com/rclone/rclone/lib/readers"
 )
 
 const (
@@ -32,7 +33,6 @@ const (
 )
 
 var (
-	ErrMissingLinkObject               = errors.New("link object must not be nil")
 	ErrCanNotUploadFileWithUnknownSize = errors.New("proton Drive can't upload files with unknown size")
 	ErrCanNotPurgeRootDirectory        = errors.New("can't purge root directory")
 )
@@ -211,9 +211,61 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	return f.newObjectWithLink(ctx, remote, nil)
 }
 
-func (o *Object) setMetaData(link *proton.Link) error {
-	if link == nil {
-		return ErrMissingLinkObject
+// readMetaDataForRemote reads the metadata from the remote
+func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *proton.Link) (*proton.Link, *protonDriveAPI.FileSystemAttrs, error) {
+	if _link == nil {
+		if _, err := f.dirCache.FindDir(ctx, remote, false); err != nil {
+			if err != fs.ErrorDirNotFound {
+				// a real error is found
+				return nil, nil, err
+			}
+			// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder
+		} else {
+			// a folder is found, the remote is not a path to file
+			return nil, nil, fs.ErrorIsDir
+		}
+
+		// attempt to locate the file
+		leaf, folderLinkID, err := f.dirCache.FindPath(ctx, remote, false)
+		if err != nil {
+			if err == fs.ErrorDirNotFound {
+				// parent folder of the file not found, we for sure can't find the file
+				return nil, nil, fs.ErrorObjectNotFound
+			}
+			// other error has occurred
+			return nil, nil, err
+		}
+
+		link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		if link == nil { // both link and err are nil, file not found
+			return nil, nil, fs.ErrorObjectNotFound
+		}
+
+		_link = link
+	}
+
+	_, fileSystemAttrs, err := f.protonDrive.GetActiveRevisionWithAttrs(ctx, _link)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return _link, fileSystemAttrs, nil
+}
+
+// readMetaData gets the metadata if it hasn't already been fetched
+//
+// it also sets the info
+func (o *Object) readMetaData(ctx context.Context, link *proton.Link) (err error) {
+	if o.link != nil {
+		return nil
+	}
+
+	link, fileSystemAttrs, err := o.fs.readMetaDataForRemote(ctx, o.remote, link)
+	if err != nil {
+		return err
 	}
 
 	o.id = link.LinkID
@@ -223,59 +275,13 @@ func (o *Object) setMetaData(link *proton.Link) error {
 	o.data = nil
 	o.mimetype = link.MIMEType
 	o.link = link
-	// intentionally not touch o.originalSize since it might be updated elsewhere
+
+	if fileSystemAttrs != nil {
+		o.modTime = fileSystemAttrs.ModificationTime
+		o.originalSize = &fileSystemAttrs.Size
+	}
 
 	return nil
-}
-
-// readMetaDataForRemote reads the metadata from the remote
-func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string) (*proton.Link, error) {
-	if _, err := f.dirCache.FindDir(ctx, remote, false); err != nil {
-		if err != fs.ErrorDirNotFound {
-			// a real error is found
-			return nil, err
-		}
-		// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder
-	} else {
-		// a folder is found, the remote is not a path to file
-		return nil, fs.ErrorIsDir
-	}
-
-	// attempt to locate the file
-	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, remote, false)
-	if err != nil {
-		if err == fs.ErrorDirNotFound {
-			// parent folder of the file not found, we for sure can't find the file
-			return nil, fs.ErrorObjectNotFound
-		}
-		// other error has occurred
-		return nil, err
-	}
-
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
-	if err != nil {
-		return nil, err
-	}
-	if link == nil { // both link and err are nil, file not found
-		return nil, fs.ErrorObjectNotFound
-	}
-
-	return link, nil
-}
-
-// readMetaData gets the metadata if it hasn't already been fetched
-//
-// it also sets the info
-func (o *Object) readMetaData(ctx context.Context) (err error) {
-	if o.link != nil {
-		return nil
-	}
-
-	link, err := o.fs.readMetaDataForRemote(ctx, o.remote)
-	if err != nil {
-		return err
-	}
-	return o.setMetaData(link)
 }
 
 // Return an Object from a path
@@ -286,12 +292,8 @@ func (f *Fs) newObjectWithLink(ctx context.Context, remote string, link *proton.
 		fs:     f,
 		remote: remote,
 	}
-	var err error
-	if link != nil {
-		err = o.setMetaData(link)
-	} else {
-		err = o.readMetaData(ctx)
-	}
+
+	err := o.readMetaData(ctx, link)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +472,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 
 // Precision of the ModTimes in this Fs
 func (f *Fs) Precision() time.Duration {
-	return fs.ModTimeNotSupported
+	return time.Second
 }
 
 // DirCacheFlush an optional interface to flush internal directory cache
@@ -534,19 +536,11 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 func (o *Object) Size() int64 {
 	if o.fs.opt.ReportOriginalSize {
 		// This option is for unit / integration test only
-		// DO NOT USE IN PRODUCTION
 		if o.originalSize != nil {
 			return *o.originalSize
 		}
 
-		_, err := o.Open(context.Background(), nil)
-		if err != nil {
-			log.Fatalln("Size Open err", err)
-		}
-
-		if o.originalSize != nil {
-			return *o.originalSize
-		}
+		log.Fatalln("Original size should exist")
 	}
 	return o.size
 }
@@ -571,15 +565,39 @@ func (o *Object) Storable() bool {
 
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
-	data, err := o.fs.protonDrive.DownloadFileByID(ctx, o.id)
+	// download and decrypt the file
+	data, fileSystemAttrs, err := o.fs.protonDrive.DownloadFileByID(ctx, o.id)
 	if err != nil {
 		return nil, err
 	}
 	o.data = data
-	originalSize := int64(len(o.data))
-	o.originalSize = &originalSize
 
-	return io.NopCloser(bytes.NewReader(o.data)), nil
+	if fileSystemAttrs != nil {
+		o.originalSize = &fileSystemAttrs.Size
+
+		o.modTime = fileSystemAttrs.ModificationTime
+	} else {
+		originalSize := int64(len(o.data))
+		o.originalSize = &originalSize
+	}
+
+	// deal with options
+	var offset, limit int64 = 0, -1
+	for _, option := range options { // if the caller passes in nil for options, it will become array of nil
+		switch x := option.(type) {
+		case *fs.SeekOption:
+			offset = x.Offset
+		case *fs.RangeOption:
+			offset, limit = x.Decode(o.Size())
+		default:
+			if option.Mandatory() {
+				fs.Logf(o, "Unsupported mandatory option: %v", option)
+			}
+		}
+	}
+
+	retReader := io.NopCloser(bytes.NewReader(o.data[offset:])) // the NewLimitedReadCloser will deal with the limit
+	return readers.NewLimitedReadCloser(retReader, limit), nil
 }
 
 // Update in to the object with the modTime given of the given size
@@ -606,7 +624,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 	o.originalSize = &originalSize
 
-	return o.setMetaData(link)
+	return o.readMetaData(ctx, link)
 }
 
 // Remove an object

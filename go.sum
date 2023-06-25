@@ -299,10 +299,10 @@ github.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/C
 github.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230624210208-dd61cc8863b0 h1:bppHqrvmbydj4uhqh7WnMne7WtDn6AvlsQFwMkmWxjY=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230624210208-dd61cc8863b0/go.mod h1:vHUvIBIUugZQ2WnOkP+tJLSP78LAXNFO7EdQNeM7ArE=
-github.com/henrybear327/go-proton-api v0.0.0-20230624205832-9f118eb6e3d7 h1:8FOAGLnMsYPEn7pto7eu3awnwIRfIabBB7yaytaCaB0=
-github.com/henrybear327/go-proton-api v0.0.0-20230624205832-9f118eb6e3d7/go.mod h1:l42xBSOrCmkAxzWUHcoUsG/cP8m1hMhV72GoChOX3bg=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230625131834-ba9695a41cfa h1:LJ4IWpryw1O0oaxjVzTVmYdIwCvebcP80mj/25302AQ=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230625131834-ba9695a41cfa/go.mod h1:7R3TpgtawBtIeOsBRw1WmxNV+lEEAta31Ix2bbvFTE4=
+github.com/henrybear327/go-proton-api v0.0.0-20230625131540-901687170a11 h1:TQa3nY/xSJMfgI2f194W3uoeQDKjlv3lMdnO87ph3Q0=
+github.com/henrybear327/go-proton-api v0.0.0-20230625131540-901687170a11/go.mod h1:l42xBSOrCmkAxzWUHcoUsG/cP8m1hMhV72GoChOX3bg=
 github.com/hirochachacha/go-smb2 v1.1.0 h1:b6hs9qKIql9eVXAiN0M2wSFY5xnhbHAQoCwRKbaRTZI=
 github.com/hirochachacha/go-smb2 v1.1.0/go.mod h1:8F1A4d5EZzrGu5R7PU163UcMRDJQl4FtcxjBfsY8TZE=
 github.com/huandu/xstrings v1.0.0/go.mod h1:4qWG/gcEcfX4z/mBDHJ++3ReCw9ibxbsNJbcucJdbSo=
@@ -465,6 +465,8 @@ github.com/putdotio/go-putio/putio v0.0.0-20200123120452-16d982cac2b8 h1:Y258uzX
 github.com/putdotio/go-putio/putio v0.0.0-20200123120452-16d982cac2b8/go.mod h1:bSJjRokAHHOhA+XFxplld8w2R/dXLH7Z3BZ532vhFwU=
 github.com/rclone/ftp v0.0.0-20230327202000-dadc1f64e87d h1:ZyH6ZfA/PzxF4qQS2MgFLXRdw/pWOSNJA7Lq0pkX49Y=
 github.com/rclone/ftp v0.0.0-20230327202000-dadc1f64e87d/go.mod h1:mWj8othLks994zO7BLHHfh9cpj1eM1n7XqWvX+DM6ic=
+github.com/relvacode/iso8601 v1.3.0 h1:HguUjsGpIMh/zsTczGN3DVJFxTU/GX+MMmzcKoMO7ko=
+github.com/relvacode/iso8601 v1.3.0/go.mod h1:FlNp+jz+TXpyRqgmM7tnzHHzBnz776kmAH2h3sZCn0I=
 github.com/rfjakob/eme v1.1.2 h1:SxziR8msSOElPayZNFfQw4Tjx/Sbaeeh3eRvrHVMUs4=
 github.com/rfjakob/eme v1.1.2/go.mod h1:cVvpasglm/G3ngEfcfT/Wt0GwhkuO32pf/poW6Nyk1k=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
