@@ -71,10 +71,12 @@ func init() {
 			Advanced: true,
 			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
 			Default: (encoder.Base |
-				encoder.EncodeInvalidUtf8),
+				encoder.EncodeInvalidUtf8 |
+				encoder.EncodeLeftSpace |
+				encoder.EncodeRightSpace),
 		}, {
-			Name:     "reportorginalsize",
-			Help:     "The default size returned will be the size on the proton drive (after encryption), but for unit / integration tests, we need to obtain the original content size. Set to true, will return the original content size, but, it will have performance and network implications, since decryption will be performed",
+			Name:     "returnoriginalfilesize",
+			Help:     "The default size returned will be the size on the proton drive (after encryption), but for unit / integration tests, we need to obtain the original content size.",
 			Advanced: true,
 			Default:  false,
 		}},
@@ -88,7 +90,7 @@ type Options struct {
 	TwoFA    string `config:"2fa"`
 	// advance
 	Enc                encoder.MultiEncoder `config:"encoding"`
-	ReportOriginalSize bool                 `config:"reportorginalsize"`
+	ReportOriginalSize bool                 `config:"returnoriginalfilesize"`
 }
 
 // Fs represents a remote proton drive
