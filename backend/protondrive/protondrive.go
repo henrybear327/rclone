@@ -258,6 +258,29 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	return f.newObjectWithLink(ctx, remote, nil)
 }
 
+func (f *Fs) getObjectLink(ctx context.Context, remote string) (*proton.Link, error) {
+	// attempt to locate the file
+	leaf, folderLinkID, err := f.dirCache.FindPath(ctx, f.sanitizePath(remote), false)
+	if err != nil {
+		if err == fs.ErrorDirNotFound {
+			// parent folder of the file not found, we for sure can't find the file
+			return nil, fs.ErrorObjectNotFound
+		}
+		// other error has occurred
+		return nil, err
+	}
+
+	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
+	if err != nil {
+		return nil, err
+	}
+	if link == nil { // both link and err are nil, file not found
+		return nil, fs.ErrorObjectNotFound
+	}
+
+	return link, nil
+}
+
 // readMetaDataForRemote reads the metadata from the remote
 func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *proton.Link) (*proton.Link, *protonDriveAPI.FileSystemAttrs, error) {
 	if _link == nil {
@@ -272,26 +295,11 @@ func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *pr
 			return nil, nil, fs.ErrorIsDir
 		}
 
-		// attempt to locate the file
-		leaf, folderLinkID, err := f.dirCache.FindPath(ctx, f.sanitizePath(remote), false)
-		if err != nil {
-			if err == fs.ErrorDirNotFound {
-				// parent folder of the file not found, we for sure can't find the file
-				return nil, nil, fs.ErrorObjectNotFound
-			}
-			// other error has occurred
-			return nil, nil, err
-		}
-
-		link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
+		var err error
+		_link, err = f.getObjectLink(ctx, remote)
 		if err != nil {
 			return nil, nil, err
 		}
-		if link == nil { // both link and err are nil, file not found
-			return nil, nil, fs.ErrorObjectNotFound
-		}
-
-		_link = link
 	}
 
 	_, fileSystemAttrs, err := f.protonDrive.GetActiveRevisionWithAttrs(ctx, _link)
@@ -634,6 +642,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 
 		o.modTime = fileSystemAttrs.ModificationTime
 	} else {
+		log.Println("fileSystemAttrs is nil: using fallback size")
 		originalSize := int64(len(o.data))
 		o.originalSize = &originalSize
 	}
@@ -741,7 +750,36 @@ func (f *Fs) Disconnect(ctx context.Context) error {
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	return nil, fs.ErrorCantMove
+	srcObj, ok := src.(*Object)
+	if !ok {
+		fs.Debugf(src, "Can't move - not same remote type")
+		return nil, fs.ErrorCantMove
+	}
+
+	// check if the remote (dst) exists
+	_, err := f.NewObject(ctx, remote)
+	if err != nil {
+		if err != fs.ErrorObjectNotFound {
+			return nil, err
+		}
+		// object is indeed not found
+	} else {
+		// object at the dst exists
+		return nil, fs.ErrorCantMove
+	}
+
+	// attempt the move
+	dstLeaf, dstDirectoryID, err := f.dirCache.FindPath(ctx, f.sanitizePath(remote), true)
+	if err != nil {
+		return nil, err
+	}
+	err = f.protonDrive.MoveFileByID(ctx, srcObj.id, dstDirectoryID, dstLeaf)
+	if err != nil {
+		return nil, err
+	}
+	f.dirCache.FlushDir(f.sanitizePath(src.Remote()))
+
+	return f.NewObject(ctx, remote)
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
