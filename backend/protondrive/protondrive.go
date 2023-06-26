@@ -26,6 +26,15 @@ import (
 	"github.com/rclone/rclone/lib/readers"
 )
 
+/*
+- dirCache operates on relative path to root
+- path sanitization
+	- rule of thumb: sanitize before use, but store things as-is
+	- the paths cached in dirCache are after sanitizing
+	- the remote/dir passed in aren't, and are stored as-is
+
+*/
+
 const (
 	minSleep      = 10 * time.Millisecond
 	maxSleep      = 2 * time.Second
@@ -131,6 +140,16 @@ func (f *Fs) Features() *fs.Features {
 	return f.features
 }
 
+// run all the dir/remote through this
+func (f *Fs) sanitizePath(_path string) string {
+	_path = path.Clean(_path)
+	if _path == "." || _path == "/" {
+		return ""
+	}
+
+	return f.opt.Enc.FromStandardPath(_path)
+}
+
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
@@ -174,7 +193,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	f.protonDrive = protonDrive
 
-	root = strings.Trim(root, "/")
+	root = f.sanitizePath(root)
 	f.dirCache = dircache.New(
 		root,                         /* root folder path */
 		protonDrive.MainShare.LinkID, /* real root ID is the root folder, since we can't go past this folder */
@@ -240,7 +259,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // readMetaDataForRemote reads the metadata from the remote
 func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *proton.Link) (*proton.Link, *protonDriveAPI.FileSystemAttrs, error) {
 	if _link == nil {
-		if _, err := f.dirCache.FindDir(ctx, remote, false); err != nil {
+		if _, err := f.dirCache.FindDir(ctx, f.sanitizePath(remote), false); err != nil {
 			if err != fs.ErrorDirNotFound {
 				// a real error is found
 				return nil, nil, err
@@ -252,7 +271,7 @@ func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *pr
 		}
 
 		// attempt to locate the file
-		leaf, folderLinkID, err := f.dirCache.FindPath(ctx, remote, false)
+		leaf, folderLinkID, err := f.dirCache.FindPath(ctx, f.sanitizePath(remote), false)
 		if err != nil {
 			if err == fs.ErrorDirNotFound {
 				// parent folder of the file not found, we for sure can't find the file
@@ -262,7 +281,7 @@ func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *pr
 			return nil, nil, err
 		}
 
-		link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, f.opt.Enc.FromStandardName(leaf), true, false)
+		link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -336,7 +355,7 @@ func (f *Fs) newObjectWithLink(ctx context.Context, remote string, link *proton.
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false) // will handle ErrDirNotFound here
+	folderLinkID, err := f.dirCache.FindDir(ctx, f.sanitizePath(dir), false) // will handle ErrDirNotFound here
 	if err != nil {
 		return nil, err
 	}
@@ -369,9 +388,12 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 //
 // This should be implemented by the backend and will be called by the
 // dircache package when appropriate.
+//
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, f.opt.Enc.FromStandardName(leaf), false, true)
+	/* f.opt.Enc.FromStandardName(leaf) not required since the DirCache only process sanitized path */
+
+	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true)
 	if err != nil {
 		return "", false, err
 	}
@@ -382,9 +404,16 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 	return link.LinkID, true, nil
 }
 
+// DirCacher describes an interface for doing the low level directory work
+//
+// This should be implemented by the backend and will be called by the
+// dircache package when appropriate.
+//
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	return f.protonDrive.CreateNewFolderByID(ctx, pathID, f.opt.Enc.FromStandardName(leaf))
+	/* f.opt.Enc.FromStandardName(leaf) not required since the DirCache only process sanitized path */
+
+	return f.protonDrive.CreateNewFolderByID(ctx, pathID, leaf)
 }
 
 // Put in to the remote path with the modTime given of the given size
@@ -428,7 +457,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	//      ^~~~~~~~~~~^ dirPath
 
 	// Create the directory for the object if it doesn't exist
-	_, _, err := f.dirCache.FindPath(ctx, remote, true)
+	_, _, err := f.dirCache.FindPath(ctx, f.sanitizePath(remote), true)
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +501,7 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 //
 // Shouldn't return an error if it already exists
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
-	_, err := f.dirCache.FindDir(ctx, dir, true)
+	_, err := f.dirCache.FindDir(ctx, f.sanitizePath(dir), true)
 	return err
 }
 
@@ -480,9 +509,9 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	folderLinkID, err := f.dirCache.FindDir(ctx, f.sanitizePath(dir), false)
 	if err == fs.ErrorDirNotFound {
-		return fmt.Errorf("[Rmdir] cannot find LinkID for dir %s", dir)
+		return fmt.Errorf("[Rmdir] cannot find LinkID for dir %s (%s)", dir, f.sanitizePath(dir))
 	} else if err != nil {
 		return err
 	}
@@ -492,7 +521,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 		return err
 	}
 
-	f.dirCache.FlushDir(dir)
+	f.dirCache.FlushDir(f.sanitizePath(dir))
 	return nil
 }
 
@@ -638,13 +667,13 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	remote := o.Remote()
-	leaf, folderLinkID, err := o.fs.dirCache.FindPath(ctx, remote, true)
+	leaf, folderLinkID, err := o.fs.dirCache.FindPath(ctx, o.fs.sanitizePath(remote), true)
 	if err != nil {
 		return err
 	}
 
 	modTime := src.ModTime(ctx)
-	link, originalSize, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, o.fs.opt.Enc.FromStandardName(leaf), modTime, in)
+	link, originalSize, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in)
 	if err != nil {
 		return err
 	}
@@ -676,7 +705,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 		return ErrCanNotPurgeRootDirectory
 	}
 
-	folderLinkID, err := f.dirCache.FindDir(ctx, dir, false)
+	folderLinkID, err := f.dirCache.FindDir(ctx, f.sanitizePath(dir), false)
 	if err != nil {
 		return err
 	}
@@ -728,7 +757,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 		return fs.ErrorCantDirMove
 	}
 
-	srcID, _, _, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
+	srcID, _, _, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, f.sanitizePath(srcFs.root), f.sanitizePath(srcRemote), f.sanitizePath(f.root), f.sanitizePath(dstRemote))
 	if err != nil {
 		return err
 	}
@@ -737,16 +766,17 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	if err != nil {
 		return err
 	}
-	srcFs.dirCache.FlushDir(srcRemote)
+	srcFs.dirCache.FlushDir(f.sanitizePath(srcRemote))
+
 	return nil
 }
 
 // Check the interfaces are satisfied
 var (
-	_ fs.Fs             = (*Fs)(nil)
-	_ fs.PutUncheckeder = (*Fs)(nil)
-	// _ fs.Mover           = (*Fs)(nil)
-	// _ fs.DirMover        = (*Fs)(nil)
+	_ fs.Fs              = (*Fs)(nil)
+	_ fs.PutUncheckeder  = (*Fs)(nil)
+	_ fs.Mover           = (*Fs)(nil)
+	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
