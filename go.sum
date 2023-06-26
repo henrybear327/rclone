@@ -160,8 +160,8 @@ github.com/emersion/go-message v0.16.0 h1:uZLz8ClLv3V5fSFF/fFdW9jXjrZkXIpE1Fn8fK
 github.com/emersion/go-message v0.16.0/go.mod h1:pDJDgf/xeUIF+eicT6B/hPX/ZbEorKkUMPOxrPVG2eQ=
 github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594 h1:IbFBtwoTQyw0fIM5xv1HF+Y+3ZijDR839WMulgxCcUY=
 github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594/go.mod h1:aqO8z8wPrjkscevZJFVE1wXJrLpC5LtJG7fqLOsPb2U=
-github.com/emersion/go-vcard v0.0.0-20230331202150-f3d26859ccd3 h1:hQ1wTMaKcGfobYRT88RM8NFNyX+IQHvagkm/tqViU98=
-github.com/emersion/go-vcard v0.0.0-20230331202150-f3d26859ccd3/go.mod h1:HMJKR5wlh/ziNp+sHEDV2ltblO4JD2+IdDOWtGcQBTM=
+github.com/emersion/go-vcard v0.0.0-20230626131229-38c18b295bbd h1:n1kH4lDJLDgO8sqkt0QgeQXKims1L8khdgilk9G5lm8=
+github.com/emersion/go-vcard v0.0.0-20230626131229-38c18b295bbd/go.mod h1:HMJKR5wlh/ziNp+sHEDV2ltblO4JD2+IdDOWtGcQBTM=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
@@ -299,8 +299,8 @@ github.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/C
 github.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230626100051-a676af55703b h1:CakqWI5dpsNzd38gbKXfG6ObV/brRLG4ip9r0m6DcMU=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230626100051-a676af55703b/go.mod h1:K9r7oKZnrrKyT1L9+kiKrbhn7RppFFWDQ466E7sIQN8=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230626192613-3ea21c8ebf76 h1:2ipQ6Iqo5s38gocxOBCle65/yfFpTRCJLoX/YbIUiTg=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230626192613-3ea21c8ebf76/go.mod h1:K9r7oKZnrrKyT1L9+kiKrbhn7RppFFWDQ466E7sIQN8=
 github.com/henrybear327/go-proton-api v0.0.0-20230626095836-c05921e07e64 h1:23dMmB9tttnzpli/aswiujO+/uj8Uuxh9jRSenOnQnE=
 github.com/henrybear327/go-proton-api v0.0.0-20230626095836-c05921e07e64/go.mod h1:l42xBSOrCmkAxzWUHcoUsG/cP8m1hMhV72GoChOX3bg=
 github.com/hirochachacha/go-smb2 v1.1.0 h1:b6hs9qKIql9eVXAiN0M2wSFY5xnhbHAQoCwRKbaRTZI=
