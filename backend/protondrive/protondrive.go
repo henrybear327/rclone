@@ -19,6 +19,7 @@ import (
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/obscure"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
@@ -120,6 +121,16 @@ type Object struct {
 	link *proton.Link // link data on proton server
 }
 
+// shouldRetry returns a boolean as to whether this err deserves to be
+// retried.  It returns the err as a convenience
+func shouldRetry(ctx context.Context, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
+	// Let the mega library handle the low level retries
+	return false, err
+}
+
 //------------------------------------------------------------------------------
 
 // Name of the remote (as passed into NewFs)
@@ -154,6 +165,8 @@ func (f *Fs) sanitizePath(_path string) string {
 
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
+	// pacer is not used in NewFs()
+
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -245,7 +258,10 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 // CleanUp deletes all files currently in trash
 func (f *Fs) CleanUp(ctx context.Context) error {
-	return f.protonDrive.EmptyTrash(ctx)
+	return f.pacer.Call(func() (bool, error) {
+		err := f.protonDrive.EmptyTrash(ctx)
+		return shouldRetry(ctx, err)
+	})
 }
 
 // NewObject finds the Object at remote.  If it can't be found
@@ -270,8 +286,11 @@ func (f *Fs) getObjectLink(ctx context.Context, remote string) (*proton.Link, er
 		return nil, err
 	}
 
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
-	if err != nil {
+	var link *proton.Link
+	if err = f.pacer.Call(func() (bool, error) {
+		link, err = f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
 	if link == nil { // both link and err are nil, file not found
@@ -302,8 +321,12 @@ func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *pr
 		}
 	}
 
-	_, fileSystemAttrs, err := f.protonDrive.GetActiveRevisionWithAttrs(ctx, _link)
-	if err != nil {
+	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
+	var err error
+	if err = f.pacer.Call(func() (bool, error) {
+		_, fileSystemAttrs, err = f.protonDrive.GetActiveRevisionWithAttrs(ctx, _link)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, nil, err
 	}
 
@@ -370,8 +393,11 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 		return nil, err
 	}
 
-	foldersAndFiles, err := f.protonDrive.ListDirectory(ctx, folderLinkID)
-	if err != nil {
+	var foldersAndFiles []*protonDriveAPI.ProtonDirectoryData
+	if err = f.pacer.Call(func() (bool, error) {
+		foldersAndFiles, err = f.protonDrive.ListDirectory(ctx, folderLinkID)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -403,8 +429,12 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
 	/* f.opt.Enc.FromStandardName(leaf) not required since the DirCache only process sanitized path */
 
-	link, err := f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true)
-	if err != nil {
+	var link *proton.Link
+	var err error
+	if err = f.pacer.Call(func() (bool, error) {
+		link, err = f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return "", false, err
 	}
 	if link == nil {
@@ -420,10 +450,19 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 // dircache package when appropriate.
 //
 // CreateDir makes a directory with pathID as parent and name leaf
-func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
+func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error) {
 	/* f.opt.Enc.FromStandardName(leaf) not required since the DirCache only process sanitized path */
 
-	return f.protonDrive.CreateNewFolderByID(ctx, pathID, leaf)
+	var newID string
+	var err error
+	if err = f.pacer.Call(func() (bool, error) {
+		newID, err = f.protonDrive.CreateNewFolderByID(ctx, pathID, leaf)
+		return shouldRetry(ctx, err)
+	}); err != nil {
+		return "", err
+	}
+
+	return newID, err
 }
 
 // Put in to the remote path with the modTime given of the given size
@@ -526,8 +565,10 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 		return err
 	}
 
-	err = f.protonDrive.MoveFolderToTrashByID(ctx, folderLinkID, true)
-	if err != nil {
+	if err = f.pacer.Call(func() (bool, error) {
+		err = f.protonDrive.MoveFolderToTrashByID(ctx, folderLinkID, true)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return err
 	}
 
@@ -554,8 +595,12 @@ func (f *Fs) Hashes() hash.Set {
 
 // About gets quota information
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
-	user, err := f.protonDrive.About(ctx)
-	if err != nil {
+	var user *proton.User
+	var err error
+	if err = f.pacer.Call(func() (bool, error) {
+		user, err = f.protonDrive.About(ctx)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -631,8 +676,13 @@ func (o *Object) Storable() bool {
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
 	// download and decrypt the file
-	data, fileSystemAttrs, err := o.fs.protonDrive.DownloadFileByID(ctx, o.id)
-	if err != nil {
+	var data []byte
+	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
+	var err error
+	if err = o.fs.pacer.Call(func() (bool, error) {
+		data, fileSystemAttrs, err = o.fs.protonDrive.DownloadFileByID(ctx, o.id)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
 	o.data = data
@@ -684,10 +734,15 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	modTime := src.ModTime(ctx)
-	link, originalSize, err := o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in)
-	if err != nil {
+	var link *proton.Link
+	var originalSize int64
+	if err = o.fs.pacer.Call(func() (bool, error) {
+		link, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return err
 	}
+
 	o.originalSize = &originalSize
 
 	return o.readMetaData(ctx, link)
@@ -695,7 +750,10 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 // Remove an object
 func (o *Object) Remove(ctx context.Context) error {
-	return o.fs.protonDrive.MoveFileToTrashByID(ctx, o.id)
+	return o.fs.pacer.Call(func() (bool, error) {
+		err := o.fs.protonDrive.MoveFileToTrashByID(ctx, o.id)
+		return shouldRetry(ctx, err)
+	})
 }
 
 // ID returns the ID of the Object if known, or "" if not
@@ -721,8 +779,10 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 		return err
 	}
 
-	err = f.protonDrive.MoveFolderToTrashByID(ctx, folderLinkID, false)
-	if err != nil {
+	if err = f.pacer.Call(func() (bool, error) {
+		err = f.protonDrive.MoveFolderToTrashByID(ctx, folderLinkID, false)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return err
 	}
 
@@ -737,7 +797,10 @@ func (o *Object) MimeType(ctx context.Context) string {
 
 // Disconnect the current user
 func (f *Fs) Disconnect(ctx context.Context) error {
-	return f.protonDrive.Logout(ctx)
+	return f.pacer.Call(func() (bool, error) {
+		err := f.protonDrive.Logout(ctx)
+		return shouldRetry(ctx, err)
+	})
 }
 
 // Move src to this remote using server-side move operations.
@@ -773,8 +836,10 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	if err != nil {
 		return nil, err
 	}
-	err = f.protonDrive.MoveFileByID(ctx, srcObj.id, dstDirectoryID, dstLeaf)
-	if err != nil {
+	if err = f.pacer.Call(func() (bool, error) {
+		err = f.protonDrive.MoveFileByID(ctx, srcObj.id, dstDirectoryID, dstLeaf)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
 	f.dirCache.FlushDir(f.sanitizePath(src.Remote()))
@@ -802,8 +867,10 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 		return err
 	}
 
-	err = f.protonDrive.MoveFolderByID(ctx, srcID, dstDirectoryID, dstLeaf)
-	if err != nil {
+	if err = f.pacer.Call(func() (bool, error) {
+		err = f.protonDrive.MoveFolderByID(ctx, srcID, dstDirectoryID, dstLeaf)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return err
 	}
 	srcFs.dirCache.FlushDir(f.sanitizePath(srcRemote))
