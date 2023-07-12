@@ -17,7 +17,7 @@ Paths are specified as `remote:path`
 
 Paths may be as deep as required, e.g. `remote:directory/subdirectory`.
 
-## Configuration
+## Configurations
 
 Here is an example of how to make a remote called `remote`.  First run:
 
@@ -94,13 +94,11 @@ Invalid UTF-8 bytes will be [replaced](/overview/#invalid-utf8).
 
 ### Duplicated files
 
-Proton Drive can not have two files with exactly the same name and path. If the conflict occurs, a new revision will be created.
+Proton Drive can not have two files with exactly the same name and path. If the conflict occurs, depending on the advanced config, the file might or might not be overwritten.
 
 ## Limitations
 
-This backend uses the [Proton-API-Bridge](https://github.com/henrybear327/Proton-API-Bridge),
-which is based on [go-proton-api](https://github.com/henrybear327/go-proton-api), 
-a fork of the [official repo](https://github.com/ProtonMail/go-proton-api).
+This backend uses the [Proton-API-Bridge](https://github.com/henrybear327/Proton-API-Bridge), which is based on [go-proton-api](https://github.com/henrybear327/go-proton-api), a fork of the [official repo](https://github.com/ProtonMail/go-proton-api).
 
 There is no official API documentation available from Proton Drive. But, thanks to Proton open sourcing [proton-go-api](https://github.com/ProtonMail/go-proton-api) and the web, iOS, and Android client codebases, we don't need to completely reverse engineer the APIs by observing the web client traffic! 
 

@@ -38,7 +38,7 @@ import (
 */
 
 const (
-	minSleep      = 1 * time.Millisecond
+	minSleep      = 10 * time.Millisecond
 	maxSleep      = 2 * time.Second
 	decayConstant = 2 // bigger for slower decay, exponential
 
@@ -275,8 +275,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 		config.ReusableCredential.RefreshToken = refreshToken
 		config.ReusableCredential.SaltedKeyPass = saltedKeyPass
 
-		// TODO: let's see if we can login with the access token (make at least 1 api call)
-		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config, authHandler, deAuthHandler) // FIXME: cache the refreshed access token on refresh
+		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config, authHandler, deAuthHandler)
 		if err != nil {
 			log.Println("Cached credential doesn't work, clearing and using the fallback login method")
 			// clear the access token on failure
@@ -912,7 +911,7 @@ func (o *Object) ID() string {
 func (f *Fs) Purge(ctx context.Context, dir string) error {
 	root := path.Join(f.root, dir)
 	if root == "" {
-		// TODO: we can't remove the root directory, but we can list the directory and delete every folder and file in here
+		// we can't remove the root directory, but we can list the directory and delete every folder and file in here
 		return ErrCanNotPurgeRootDirectory
 	}
 
