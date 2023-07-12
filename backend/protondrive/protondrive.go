@@ -124,6 +124,14 @@ func init() {
 			`,
 			Advanced: true,
 			Default:  false,
+		}, {
+			Name: "disableCaching",
+			Help: `The files and folders on ProtonDrive are represented as links, along with their associated keyrings, which can be cached to improve performance.
+			Currently, this is an experimental feature, as we all know, caching is hard!
+			When the feature is stablized, we will switch the default to false.
+			`,
+			Advanced: true,
+			Default:  true,
 		}},
 	})
 }
@@ -140,6 +148,7 @@ type Options struct {
 	AppVersion           string               `config:"appversion"`
 	UserAgent            string               `config:"useragent"`
 	ReplaceExistingDraft bool                 `config:"replaceexistingdraft"`
+	DisableCaching       bool                 `config:"disableCaching"`
 }
 
 // Fs represents a remote proton drive
@@ -261,6 +270,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 	config.UserAgent = opt.UserAgent
 
 	config.ReplaceExistingDraft = opt.ReplaceExistingDraft
+	config.DisableCaching = opt.DisableCaching
 
 	// let's see if we have the cached access credential
 	uid, accessToken, refreshToken, saltedKeyPass, hasUseReusableLoginCredentials := getConfigMap(m)
