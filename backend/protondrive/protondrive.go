@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"runtime"
 	"strings"
@@ -248,6 +249,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 	uid, accessToken, refreshToken, saltedKeyPass, hasUseReusableLoginCredentials := getConfigMap(m)
 
 	if hasUseReusableLoginCredentials {
+		log.Println("Has cached credentials")
 		config.UseReusableLogin = true
 
 		config.ReusableCredential.UID = uid
@@ -258,6 +260,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 		// TODO: let's see if we can login with the access token (make at least 1 api call)
 		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config) // FIXME: cache the refreshed access token on refresh
 		if err != nil {
+			log.Println("Cached credential doesn't work, clearing and using the fallback login method")
 			// clear the access token on failure
 			clearConfigMap(m)
 
@@ -265,11 +268,13 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 			// we fallback to username+password login -> don't throw an error here
 			// return nil, fmt.Errorf("couldn't initialize a new proton drive instance: %w", err)
 		} else {
+			log.Println("Used cached credential to initialize the ProtonDrive API")
 			return protonDrive, nil
 		}
 	}
 
-	// if not, let's try to log the user in again
+	// if not, let's try to log the user in using username and password (and 2FA if required)
+	log.Println("Using username and password to log in")
 	config.UseReusableLogin = false
 	config.FirstLoginCredential.Username = opt.Username
 	config.FirstLoginCredential.Password = opt.Password
@@ -278,6 +283,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 	if err != nil {
 		return nil, fmt.Errorf("couldn't initialize a new proton drive instance: %w", err)
 	}
+	log.Println("Used username and password to initialize the ProtonDrive API")
 
 	setConfigMap(m, auth.UID, auth.AccessToken, auth.RefreshToken, auth.SaltedKeyPass)
 
