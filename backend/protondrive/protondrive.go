@@ -38,7 +38,7 @@ import (
 */
 
 const (
-	minSleep      = 10 * time.Millisecond
+	minSleep      = 1 * time.Millisecond
 	maxSleep      = 2 * time.Second
 	decayConstant = 2 // bigger for slower decay, exponential
 
@@ -51,6 +51,10 @@ const (
 var (
 	ErrCanNotUploadFileWithUnknownSize = errors.New("proton Drive can't upload files with unknown size")
 	ErrCanNotPurgeRootDirectory        = errors.New("can't purge root directory")
+
+	// for the auth/deauth handler
+	_mapper        configmap.Mapper
+	_saltedKeyPass string
 )
 
 func getAPIOS() string {
@@ -115,8 +119,8 @@ func init() {
 		}, {
 			Name: "replaceexistingdraft",
 			Help: `When an upload is cancelled or failed before completion, a draft will be created and the subsequent upload of the same file to the same location will be reported as a conflict.
-				If the option is set to true (experimental feature), the draft will be replaced by restarting the upload operation. If there are other clients also uploading at the same file location at the same time, the behavior is currently unknown.
-				If the option is set to false (conservative but safe), an error "a draft exist - usually this means a file is being uploaded at another client, or, there was a failed upload attempt" will be returned, and no upload will happen.
+				If the option is set to true, the draft will be replaced and then the upload operation will restart. If there are other clients also uploading at the same file location at the same time, the behavior is currently unknown. Need to set to true for integration tests.
+				If the option is set to false, an error "a draft exist - usually this means a file is being uploaded at another client, or, there was a failed upload attempt" will be returned, and no upload will happen.
 			`,
 			Advanced: true,
 			Default:  false,
@@ -223,6 +227,7 @@ func getConfigMap(m configmap.Mapper) (uid, accessToken, refreshToken, saltedKey
 	if saltedKeyPass, ok = m.Get(clientSaltedKeyPassKey); !ok {
 		return
 	}
+	_saltedKeyPass = saltedKeyPass
 
 	return
 }
@@ -232,10 +237,22 @@ func setConfigMap(m configmap.Mapper, uid, accessToken, refreshToken, saltedKeyP
 	m.Set(clientAccessTokenKey, accessToken)
 	m.Set(clientRefreshTokenKey, refreshToken)
 	m.Set(clientSaltedKeyPassKey, saltedKeyPass)
+	_saltedKeyPass = saltedKeyPass
 }
 
 func clearConfigMap(m configmap.Mapper) {
 	setConfigMap(m, "", "", "", "")
+	_saltedKeyPass = ""
+}
+
+func authHandler(auth proton.Auth) {
+	fmt.Println("authHandler called")
+	setConfigMap(_mapper, auth.UID, auth.AccessToken, auth.RefreshToken, _saltedKeyPass)
+}
+
+func deAuthHandler() {
+	fmt.Println("deAuthHandler called")
+	clearConfigMap(_mapper)
 }
 
 func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*protonDriveAPI.ProtonDrive, error) {
@@ -247,6 +264,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 
 	// let's see if we have the cached access credential
 	uid, accessToken, refreshToken, saltedKeyPass, hasUseReusableLoginCredentials := getConfigMap(m)
+	_saltedKeyPass = saltedKeyPass
 
 	if hasUseReusableLoginCredentials {
 		log.Println("Has cached credentials")
@@ -258,7 +276,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 		config.ReusableCredential.SaltedKeyPass = saltedKeyPass
 
 		// TODO: let's see if we can login with the access token (make at least 1 api call)
-		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config) // FIXME: cache the refreshed access token on refresh
+		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config, authHandler, deAuthHandler) // FIXME: cache the refreshed access token on refresh
 		if err != nil {
 			log.Println("Cached credential doesn't work, clearing and using the fallback login method")
 			// clear the access token on failure
@@ -279,12 +297,12 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 	config.FirstLoginCredential.Username = opt.Username
 	config.FirstLoginCredential.Password = opt.Password
 	config.FirstLoginCredential.TwoFA = opt.TwoFA
-	protonDrive, auth, err := protonDriveAPI.NewProtonDrive(ctx, config)
+	protonDrive, auth, err := protonDriveAPI.NewProtonDrive(ctx, config, authHandler, deAuthHandler)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't initialize a new proton drive instance: %w", err)
 	}
-	log.Println("Used username and password to initialize the ProtonDrive API")
 
+	log.Println("Used username and password to initialize the ProtonDrive API")
 	setConfigMap(m, auth.UID, auth.AccessToken, auth.RefreshToken, auth.SaltedKeyPass)
 
 	return protonDrive, nil
@@ -293,6 +311,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// pacer is not used in NewFs()
+	_mapper = m
 
 	// Parse config into Options struct
 	opt := new(Options)
@@ -411,7 +430,7 @@ func (f *Fs) getObjectLink(ctx context.Context, remote string) (*proton.Link, er
 
 	var link *proton.Link
 	if err = f.pacer.Call(func() (bool, error) {
-		link, err = f.protonDrive.SearchByNameInFolderByID(ctx, folderLinkID, leaf, true, false, false)
+		link, err = f.protonDrive.SearchByNameInActiveFolderByID(ctx, folderLinkID, leaf, true, false, proton.LinkStateActive)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return nil, err
@@ -555,7 +574,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 	var link *proton.Link
 	var err error
 	if err = f.pacer.Call(func() (bool, error) {
-		link, err = f.protonDrive.SearchByNameInFolderByID(ctx, pathID, leaf, false, true, false)
+		link, err = f.protonDrive.SearchByNameInActiveFolderByID(ctx, pathID, leaf, false, true, proton.LinkStateActive)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return "", false, err
@@ -860,7 +879,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	var link *proton.Link
 	var originalSize int64
 	if err = o.fs.pacer.Call(func() (bool, error) {
-		link, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, false)
+		link, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, 0)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return err
