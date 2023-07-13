@@ -475,7 +475,7 @@ func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *pr
 	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
 	var err error
 	if err = f.pacer.Call(func() (bool, error) {
-		_, fileSystemAttrs, err = f.protonDrive.GetActiveRevisionWithAttrs(ctx, _link)
+		fileSystemAttrs, err = f.protonDrive.GetActiveRevisionAttrs(ctx, _link)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return nil, nil, err
