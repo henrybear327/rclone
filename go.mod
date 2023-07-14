@@ -29,7 +29,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.8
 	github.com/google/uuid v1.3.0
 	github.com/hanwen/go-fuse/v2 v2.2.1-0.20230410213758-80c1c8221982
-	github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714195459-0546f33fd251
+	github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714225255-a1bba58ab05e
 	github.com/henrybear327/go-proton-api v0.0.0-20230713211354-02be61689e29
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/iguanesolutions/go-systemd/v5 v5.1.1
@@ -90,7 +90,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bradenaw/juniper v0.13.0 // indirect
+	github.com/bradenaw/juniper v0.13.1 // indirect
 	github.com/calebcase/tmpfile v1.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect

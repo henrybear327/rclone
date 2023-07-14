@@ -110,8 +110,8 @@ github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24
 github.com/beorn7/perks v1.0.0/go.mod h1:KWe93zE9D1o94FZ5RNwFwVgaQK1VOXiVxmqh+CedLV8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
-github.com/bradenaw/juniper v0.13.0 h1:KKMAiWDkRt45YUNzzw00Jec4nOgWDLVtztjf39E0ppI=
-github.com/bradenaw/juniper v0.13.0/go.mod h1:Z2B7aJlQ7xbfWsnMLROj5t/5FQ94/MkIdKC30J4WvzI=
+github.com/bradenaw/juniper v0.13.1 h1:9P7/xeaYuEyqPuJHSHCJoisWyPvZH4FAi59BxJLh7F8=
+github.com/bradenaw/juniper v0.13.1/go.mod h1:Z2B7aJlQ7xbfWsnMLROj5t/5FQ94/MkIdKC30J4WvzI=
 github.com/bradfitz/iter v0.0.0-20140124041915-454541ec3da2/go.mod h1:PyRFw1Lt2wKX4ZVSQ2mk+PeDa1rxyObEDlApuIsUKuo=
 github.com/buengese/sgzip v0.1.1 h1:ry+T8l1mlmiWEsDrH/YHZnCVWD2S3im1KLsyO+8ZmTU=
 github.com/buengese/sgzip v0.1.1/go.mod h1:i5ZiXGF3fhV7gL1xaRRL1nDnmpNj0X061FQzOS8VMas=
@@ -299,8 +299,8 @@ github.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/C
 github.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714195459-0546f33fd251 h1:OVfUWU7pQc1aWdMu8VDu/mj22yKOoHxSImQP183EM30=
-github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714195459-0546f33fd251/go.mod h1:Sx6N6BO/KoRbMQKbsSRytlIqpVan4PmpGA5bsvZYE60=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714225255-a1bba58ab05e h1:EvNc5Ml81oyTKIZob6OhrDI87O0OinV+h8QAvXzLUN0=
+github.com/henrybear327/Proton-API-Bridge v0.0.0-20230714225255-a1bba58ab05e/go.mod h1:Sx6N6BO/KoRbMQKbsSRytlIqpVan4PmpGA5bsvZYE60=
 github.com/henrybear327/go-proton-api v0.0.0-20230713211354-02be61689e29 h1:OUVzxoIPZ6T4yC5hzvvIEjRaYwom3c9N5VwJgJvr9cs=
 github.com/henrybear327/go-proton-api v0.0.0-20230713211354-02be61689e29/go.mod h1:l42xBSOrCmkAxzWUHcoUsG/cP8m1hMhV72GoChOX3bg=
 github.com/hirochachacha/go-smb2 v1.1.0 h1:b6hs9qKIql9eVXAiN0M2wSFY5xnhbHAQoCwRKbaRTZI=

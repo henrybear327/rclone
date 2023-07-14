@@ -744,6 +744,7 @@ func (f *Fs) Precision() time.Duration {
 // as an optional interface
 func (f *Fs) DirCacheFlush() {
 	f.dirCache.ResetRoot()
+	f.protonDrive.ClearCache()
 }
 
 // Returns the supported hash types of the filesystem
@@ -1001,6 +1002,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}); err != nil {
 		return nil, err
 	}
+
 	f.dirCache.FlushDir(f.sanitizePath(src.Remote()))
 
 	return f.NewObject(ctx, remote)
@@ -1032,6 +1034,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	}); err != nil {
 		return err
 	}
+
 	srcFs.dirCache.FlushDir(f.sanitizePath(srcRemote))
 
 	return nil
