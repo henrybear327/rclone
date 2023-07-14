@@ -453,35 +453,41 @@ func (f *Fs) getObjectLink(ctx context.Context, remote string) (*proton.Link, er
 
 // readMetaDataForRemote reads the metadata from the remote
 func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *proton.Link) (*proton.Link, *protonDriveAPI.FileSystemAttrs, error) {
-	if _link == nil {
-		if _, err := f.dirCache.FindDir(ctx, f.sanitizePath(remote), false); err != nil {
-			if err != fs.ErrorDirNotFound {
-				// a real error is found
-				return nil, nil, err
-			}
-			// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder
-		} else {
-			// a folder is found, the remote is not a path to file
-			return nil, nil, fs.ErrorIsDir
-		}
+	/* It's pretty expensive to support this checking, as from the benchmarking we can see the performance degrade by more than 2x */
+	/* The code will be kept and added as a config flag in the future if needed */
+	// if _link == nil {
+	// 	if _, err := f.dirCache.FindDir(ctx, f.sanitizePath(remote), false); err != nil {
+	// 		if err != fs.ErrorDirNotFound {
+	// 			// a real error is found
+	// 			return nil, nil, err
+	// 		}
+	// 		// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder -> might be a file
+	// 	} else {
+	// 		// a folder is found, the remote is not a path to file
+	// 		return nil, nil, fs.ErrorIsDir
+	// 	}
 
-		var err error
-		_link, err = f.getObjectLink(ctx, remote)
-		if err != nil {
-			return nil, nil, err
-		}
+	// 	var err error
+	// 	_link, err = f.getObjectLink(ctx, remote)
+	// 	if err != nil {
+	// 		return nil, nil, err
+	// 	}
+	// }
+
+	link, err := f.getObjectLink(ctx, remote)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
-	var err error
 	if err = f.pacer.Call(func() (bool, error) {
-		fileSystemAttrs, err = f.protonDrive.GetActiveRevisionAttrs(ctx, _link)
+		fileSystemAttrs, err = f.protonDrive.GetActiveRevisionAttrs(ctx, link)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return nil, nil, err
 	}
 
-	return _link, fileSystemAttrs, nil
+	return link, fileSystemAttrs, nil
 }
 
 // readMetaData gets the metadata if it hasn't already been fetched
@@ -557,6 +563,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 		remote := path.Join(dir, f.opt.Enc.ToStandardName(foldersAndFiles[i].Name))
 
 		if foldersAndFiles[i].IsFolder {
+			f.dirCache.Put(remote, foldersAndFiles[i].Link.LinkID)
 			d := fs.NewDir(remote, time.Unix(foldersAndFiles[i].Link.ModifyTime, 0)).SetID(foldersAndFiles[i].Link.LinkID)
 			entries = append(entries, d)
 		} else {
