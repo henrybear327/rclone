@@ -892,18 +892,19 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	modTime := src.ModTime(ctx)
-	var link *proton.Link
+	var linkID string
 	var originalSize int64
 	if err = o.fs.pacer.Call(func() (bool, error) {
-		link, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, 0)
+		linkID, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, 0)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return err
 	}
 
+	o.id = linkID
 	o.originalSize = &originalSize
 
-	return o.readMetaData(ctx, link)
+	return nil
 }
 
 // Remove an object
