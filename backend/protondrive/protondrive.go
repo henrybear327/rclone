@@ -125,13 +125,10 @@ func init() {
 			Advanced: true,
 			Default:  false,
 		}, {
-			Name: "disableCaching",
-			Help: `The files and folders on ProtonDrive are represented as links, along with their associated keyrings, which can be cached to improve performance.
-			Currently, this is an experimental feature, as we all know, caching is hard!
-			When the feature is stablized, we will switch the default to false.
-			`,
+			Name:     "disableCaching",
+			Help:     `The files and folders on ProtonDrive are represented as links with keyrings into, can be cached to improve performance.`,
 			Advanced: true,
-			Default:  true,
+			Default:  false,
 		}},
 	})
 }
@@ -453,27 +450,6 @@ func (f *Fs) getObjectLink(ctx context.Context, remote string) (*proton.Link, er
 
 // readMetaDataForRemote reads the metadata from the remote
 func (f *Fs) readMetaDataForRemote(ctx context.Context, remote string, _link *proton.Link) (*proton.Link, *protonDriveAPI.FileSystemAttrs, error) {
-	/* It's pretty expensive to support this checking, as from the benchmarking we can see the performance degrade by more than 2x */
-	/* The code will be kept and added as a config flag in the future if needed */
-	// if _link == nil {
-	// 	if _, err := f.dirCache.FindDir(ctx, f.sanitizePath(remote), false); err != nil {
-	// 		if err != fs.ErrorDirNotFound {
-	// 			// a real error is found
-	// 			return nil, nil, err
-	// 		}
-	// 		// the error is fs.ErrorDirNotFound, which means that the remote is not a known folder -> might be a file
-	// 	} else {
-	// 		// a folder is found, the remote is not a path to file
-	// 		return nil, nil, fs.ErrorIsDir
-	// 	}
-
-	// 	var err error
-	// 	_link, err = f.getObjectLink(ctx, remote)
-	// 	if err != nil {
-	// 		return nil, nil, err
-	// 	}
-	// }
-
 	link, err := f.getObjectLink(ctx, remote)
 	if err != nil {
 		return nil, nil, err
@@ -544,6 +520,8 @@ func (f *Fs) newObjectWithLink(ctx context.Context, remote string, link *proton.
 //
 // This should return ErrDirNotFound if the directory isn't
 // found.
+// Notice that this function is expensive since everything on proton is encrypted
+// So having a remote with 10k files, during operations like sync, might take a while and lots of bandwidth!
 func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 	folderLinkID, err := f.dirCache.FindDir(ctx, f.sanitizePath(dir), false) // will handle ErrDirNotFound here
 	if err != nil {
