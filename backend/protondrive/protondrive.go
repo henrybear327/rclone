@@ -1,12 +1,10 @@
 package protondrive
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"path"
 	"runtime"
 	"strings"
@@ -103,7 +101,7 @@ func init() {
 				encoder.EncodeRightSpace),
 		}, {
 			Name:     "returnoriginalfilesize",
-			Help:     "The size of the encrypted file will be different from (bigger than) the original file size. Unless there is a reason to return the size after encryption, otherwise, set this option to true",
+			Help:     "The size of the encrypted file will be different from (bigger than) the original file size. Unless there is a reason to return the size after encryption, otherwise, set this option to true, or features such as Open() which will need to be supplied with original content size, will fail to operate properly",
 			Advanced: true,
 			Default:  true,
 		}, {
@@ -169,7 +167,6 @@ type Object struct {
 	modTime      time.Time // modification time of the object
 	createdTime  time.Time // creation time of the object
 	id           string    // ID of the object
-	data         []byte    // decrypted file byte array
 	mimetype     string    // mimetype of the file
 
 	link *proton.Link // link data on proton server
@@ -252,16 +249,16 @@ func clearConfigMap(m configmap.Mapper) {
 }
 
 func authHandler(auth proton.Auth) {
-	fmt.Println("authHandler called")
+	// log.Println("authHandler called")
 	setConfigMap(_mapper, auth.UID, auth.AccessToken, auth.RefreshToken, _saltedKeyPass)
 }
 
 func deAuthHandler() {
-	fmt.Println("deAuthHandler called")
+	// log.Println("deAuthHandler called")
 	clearConfigMap(_mapper)
 }
 
-func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*protonDriveAPI.ProtonDrive, error) {
+func newProtonDrive(ctx context.Context, f *Fs, opt *Options, m configmap.Mapper) (*protonDriveAPI.ProtonDrive, error) {
 	config := protonDriveAPI.NewDefaultConfig()
 	config.AppVersion = opt.AppVersion
 	config.UserAgent = opt.UserAgent
@@ -274,7 +271,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 	_saltedKeyPass = saltedKeyPass
 
 	if hasUseReusableLoginCredentials {
-		log.Println("Has cached credentials")
+		fs.Debugf(f, "Has cached credentials")
 		config.UseReusableLogin = true
 
 		config.ReusableCredential.UID = uid
@@ -284,21 +281,21 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 
 		protonDrive /* credential will be nil since access credentials are passed in */, _, err := protonDriveAPI.NewProtonDrive(ctx, config, authHandler, deAuthHandler)
 		if err != nil {
-			log.Println("Cached credential doesn't work, clearing and using the fallback login method")
+			fs.Debugf(f, "Cached credential doesn't work, clearing and using the fallback login method")
 			// clear the access token on failure
 			clearConfigMap(m)
 
-			fmt.Println("couldn't initialize a new proton drive instance using cached credentials: %w", err)
+			fs.Debugf(f, "couldn't initialize a new proton drive instance using cached credentials: %v", err)
 			// we fallback to username+password login -> don't throw an error here
 			// return nil, fmt.Errorf("couldn't initialize a new proton drive instance: %w", err)
 		} else {
-			log.Println("Used cached credential to initialize the ProtonDrive API")
+			fs.Debugf(f, "Used cached credential to initialize the ProtonDrive API")
 			return protonDrive, nil
 		}
 	}
 
 	// if not, let's try to log the user in using username and password (and 2FA if required)
-	log.Println("Using username and password to log in")
+	fs.Debugf(f, "Using username and password to log in")
 	config.UseReusableLogin = false
 	config.FirstLoginCredential.Username = opt.Username
 	config.FirstLoginCredential.Password = opt.Password
@@ -308,7 +305,7 @@ func newProtonDrive(ctx context.Context, opt *Options, m configmap.Mapper) (*pro
 		return nil, fmt.Errorf("couldn't initialize a new proton drive instance: %w", err)
 	}
 
-	log.Println("Used username and password to initialize the ProtonDrive API")
+	fs.Debugf(f, "Used username and password to initialize the ProtonDrive API")
 	setConfigMap(m, auth.UID, auth.AccessToken, auth.RefreshToken, auth.SaltedKeyPass)
 
 	return protonDrive, nil
@@ -348,9 +345,15 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	f.features = (&fs.Features{
 		ReadMimeType:            true,
 		CanHaveEmptyDirectories: true,
+		/* can't have multiple threads downloading
+		The raw file is split into equally-sized (currently 4MB, but it might change in the future, say to 8MB, 16MB, etc.) blocks, except the last one which might be smaller than 4MB.
+		Each block is encrypted separately, where the size and sha1 after the encryption is performed on the block is added to the metadata of the block, but the original block size and sha1 is not in the metadata.
+		We can make assumption and implement the chunker, but for now, we would rather be safe about it, and let the block being concurrently downloaded and decrypted in the background, to speed up the download operation!
+		*/
+		NoMultiThreading: true,
 	}).Fill(ctx, f)
 
-	protonDrive, err := newProtonDrive(ctx, opt, m)
+	protonDrive, err := newProtonDrive(ctx, f, opt, m)
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +486,6 @@ func (o *Object) readMetaData(ctx context.Context, link *proton.Link) (err error
 	o.size = link.Size
 	o.modTime = time.Unix(link.ModifyTime, 0)
 	o.createdTime = time.Unix(link.CreateTime, 0)
-	o.data = nil
 	o.mimetype = link.MIMEType
 	o.link = link
 
@@ -655,7 +657,6 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		originalSize: nil,
 		id:           "",
 		modTime:      modTime,
-		data:         nil,
 		mimetype:     "",
 		link:         nil,
 	}
@@ -782,7 +783,8 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 // Size returns the size of an object in bytes
 func (o *Object) Size() int64 {
 	if o.fs.opt.ReportOriginalSize {
-		// This option is for unit / integration test only
+		// if ReportOriginalSize is set, we will generate an error when the original size failed to be parsed
+		// this is crucial as features like Open() will need to use the proper size to operate the seek/range operator
 		if o.originalSize != nil {
 			return *o.originalSize
 		}
@@ -813,28 +815,27 @@ func (o *Object) Storable() bool {
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
 	// download and decrypt the file
-	var data []byte
+	var reader io.ReadCloser
 	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
+	var sizeOnServer int64
 	var err error
 	if err = o.fs.pacer.Call(func() (bool, error) {
-		data, fileSystemAttrs, err = o.fs.protonDrive.DownloadFileByID(ctx, o.id)
+		reader, sizeOnServer, fileSystemAttrs, err = o.fs.protonDrive.DownloadFileByID(ctx, o.id)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return nil, err
 	}
-	o.data = data
 
 	if fileSystemAttrs != nil {
 		o.originalSize = &fileSystemAttrs.Size
-
 		o.modTime = fileSystemAttrs.ModificationTime
 	} else {
 		fs.Debugf(o, "fileSystemAttrs is nil: using fallback size")
-		originalSize := int64(len(o.data))
-		o.originalSize = &originalSize
+		o.originalSize = &sizeOnServer
+		o.size = sizeOnServer
 	}
 
-	// deal with options
+	fs.FixRangeOption(options, *o.originalSize)
 	var offset, limit int64 = 0, -1
 	for _, option := range options { // if the caller passes in nil for options, it will become array of nil
 		switch x := option.(type) {
@@ -849,7 +850,14 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 		}
 	}
 
-	retReader := io.NopCloser(bytes.NewReader(o.data[offset:])) // the NewLimitedReadCloser will deal with the limit
+	retReader := io.NopCloser(reader) // the NewLimitedReadCloser will deal with the limit
+
+	// deal with offset
+	if _, err := io.CopyN(io.Discard, retReader, offset); err != nil {
+		return nil, err
+	}
+
+	// deal with limit
 	return readers.NewLimitedReadCloser(retReader, limit), nil
 }
 
