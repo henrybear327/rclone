@@ -18,7 +18,6 @@ import (
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/obscure"
-	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
@@ -205,10 +204,6 @@ type Object struct {
 // shouldRetry returns a boolean as to whether this err deserves to be
 // retried.  It returns the err as a convenience
 func shouldRetry(ctx context.Context, err error) (bool, error) {
-	if fserrors.ContextError(ctx, &err) {
-		return false, err
-	}
-	// Let the mega library handle the low level retries
 	return false, err
 }
 
@@ -981,9 +976,9 @@ func (f *Fs) Disconnect(ctx context.Context) error {
 
 // Move src to this remote using server-side move operations.
 //
-// # This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// # It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

@@ -90,7 +90,7 @@ Proton Drive does not support modification times or hashes yet.
 
 ### Restricted filename characters
 
-Invalid UTF-8 bytes will be [replaced](/overview/#invalid-utf8).
+Invalid UTF-8 bytes will be [replaced](/overview/#invalid-utf8), also left and right spaces will be removed ([code reference](https://github.com/ProtonMail/WebClients/blob/b4eba99d241af4fdae06ff7138bd651a40ef5d3c/applications/drive/src/app/store/_links/validation.ts#L51))
 
 ### Duplicated files
 
