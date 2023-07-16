@@ -79,52 +79,81 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "username",
-			Help:     "Username",
+			Help:     `The username of your proton drive account`,
 			Required: true,
 		}, {
 			Name:       "password",
-			Help:       "Password",
+			Help:       "The password of your proton drive account.",
 			Required:   true,
 			IsPassword: true,
 		}, {
-			Name:     "2fa",
-			Help:     "2FA code (if the account requires one)",
+			Name: "2fa",
+			Help: `The 2FA code
+The 2FA code of your proton drive account if the account is set up with 
+two-factor authentication`,
 			Required: false,
 		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
-			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
 			Default: (encoder.Base |
 				encoder.EncodeInvalidUtf8 |
 				encoder.EncodeLeftSpace |
 				encoder.EncodeRightSpace),
 		}, {
-			Name:     "returnoriginalfilesize",
-			Help:     "The size of the encrypted file will be different from (bigger than) the original file size. Unless there is a reason to return the size after encryption, otherwise, set this option to true, or features such as Open() which will need to be supplied with original content size, will fail to operate properly",
+			Name: "original_file_size",
+			Help: `Return the file size before encryption
+			
+The size of the encrypted file will be different from (bigger than) the 
+original file size. Unless there is a reason to return the file size 
+after encryption is performed, otherwise, set this option to true, as 
+features like Open() which will need to be supplied with original content 
+size, will fail to operate properly`,
 			Advanced: true,
 			Default:  true,
 		}, {
-			Name:     "appversion",
-			Help:     "The app version string that will be sent with every API request. Looks like using [OS]-drive (e.g. windows-drive) prefix will spare us from getting aggressive human verification blocking",
+			Name: "app_version",
+			Help: `The app version string 
+
+The app version string indicates the client that is currently performing 
+the API request. This information is required and will be sent with every 
+API request.
+
+Looks like using [OS]-drive (e.g. windows-drive) prefix will spare us from 
+getting aggressive human verification blocking.`,
 			Advanced: true,
 			Default:  getAPIOS() + "-drive@5.0.14.2",
 		}, {
-			Name:     "useragent",
-			Help:     "The user agent string that will be sent with every API request",
+			Name: "user_agent",
+			Help: `The user agent string
+			
+The user agent string that will be sent with every API request to indicate 
+what platform our code is running on. It's an optional string.`,
 			Advanced: true,
 			Default:  "",
 		}, {
-			Name: "replaceexistingdraft",
-			Help: `When an upload is cancelled or failed before completion, a draft will be created and the subsequent upload of the same file to the same location will be reported as a conflict.
-				If the option is set to true, the draft will be replaced and then the upload operation will restart. If there are other clients also uploading at the same file location at the same time, the behavior is currently unknown. Need to set to true for integration tests.
-				If the option is set to false, an error "a draft exist - usually this means a file is being uploaded at another client, or, there was a failed upload attempt" will be returned, and no upload will happen.
-			`,
+			Name: "replace_existing_draft",
+			Help: `Create a new revision when filename conflict is detected
+
+When a file upload is cancelled or failed before completion, a draft will be created 
+and the subsequent upload of the same file to the same location will be reported 
+as a conflict.
+
+If the option is set to true, the draft will be replaced and then the upload 
+operation will restart. If there are other clients also uploading at the same 
+file location at the same time, the behavior is currently unknown. Need to set 
+to true for integration tests.
+If the option is set to false, an error "a draft exist - usually this means a 
+file is being uploaded at another client, or, there was a failed upload attempt" 
+will be returned, and no upload will happen.`,
 			Advanced: true,
 			Default:  false,
 		}, {
-			Name:     "enableCaching",
-			Help:     `The files and folders on ProtonDrive are represented as links with keyrings, which can be cached to improve performance.`,
+			Name: "enable_caching",
+			Help: `Caches the files and folders metadata to reduce API calls
+
+The files and folders on ProtonDrive are represented as links with keyrings, which 
+can be cached to improve performance and be friendly to the API server.`,
 			Advanced: true,
 			Default:  true,
 		}},
@@ -139,17 +168,18 @@ type Options struct {
 
 	// advanced
 	Enc                  encoder.MultiEncoder `config:"encoding"`
-	ReportOriginalSize   bool                 `config:"returnoriginalfilesize"`
-	AppVersion           string               `config:"appversion"`
-	UserAgent            string               `config:"useragent"`
-	ReplaceExistingDraft bool                 `config:"replaceexistingdraft"`
-	EnableCaching        bool                 `config:"enableCaching"`
+	ReportOriginalSize   bool                 `config:"original_file_size"`
+	AppVersion           string               `config:"app_version"`
+	UserAgent            string               `config:"user_agent"`
+	ReplaceExistingDraft bool                 `config:"replace_existing_draft"`
+	EnableCaching        bool                 `config:"enable_caching"`
 }
 
 // Fs represents a remote proton drive
 type Fs struct {
-	name        string                      // name of this remote
-	root        string                      // the path we are working on. Notice that for ProtonDrive, it's attached under rootLink (usually /root)
+	name string // name of this remote
+	// Notice that for ProtonDrive, it's attached under rootLink (usually /root)
+	root        string                      // the path we are working on.
 	opt         Options                     // parsed config options
 	ci          *fs.ConfigInfo              // global config
 	features    *fs.Features                // optional features
