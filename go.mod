@@ -29,8 +29,8 @@ require (
 	github.com/go-chi/chi/v5 v5.0.8
 	github.com/google/uuid v1.3.0
 	github.com/hanwen/go-fuse/v2 v2.2.1-0.20230410213758-80c1c8221982
-	github.com/henrybear327/Proton-API-Bridge v0.0.0-20230716040616-cedf21b69527
-	github.com/henrybear327/go-proton-api v0.0.0-20230713211354-02be61689e29
+	github.com/henrybear327/Proton-API-Bridge v0.0.0-20230717202317-91360dbda152
+	github.com/henrybear327/go-proton-api v0.0.0-20230717103708-031d819d74ab
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/iguanesolutions/go-systemd/v5 v5.1.1
 	github.com/jcmturner/gokrb5/v8 v8.4.4
@@ -86,7 +86,7 @@ require (
 	github.com/ProtonMail/gluon v0.17.0 // indirect
 	github.com/ProtonMail/go-mime v0.0.0-20230322103455-7d82a3887f2f // indirect
 	github.com/ProtonMail/go-srp v0.0.7 // indirect
-	github.com/ProtonMail/gopenpgp/v2 v2.7.1 // indirect
+	github.com/ProtonMail/gopenpgp/v2 v2.7.2 // indirect
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -159,7 +159,7 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.5.2 // indirect
-	github.com/ProtonMail/go-crypto v0.0.0-20230710112148-e01326fd72eb
+	github.com/ProtonMail/go-crypto v0.0.0-20230717121422-5aa5874ade95
 	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/go-querystring v1.1.0 // indirect

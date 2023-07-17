@@ -88,9 +88,9 @@ To copy a local directory to an Proton Drive directory called backup
 
     rclone copy /home/source remote:backup
 
-### Modified time and hashes
+### Modified time
 
-Proton Drive does not support modification times or hashes yet.
+Proton Drive Bridge does not support modification times yet.
 
 ### Restricted filename characters
 

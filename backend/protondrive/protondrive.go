@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"runtime"
 	"strings"
@@ -31,7 +32,6 @@ import (
 	- rule of thumb: sanitize before use, but store things as-is
 	- the paths cached in dirCache are after sanitizing
 	- the remote/dir passed in aren't, and are stored as-is
-
 */
 
 const (
@@ -48,6 +48,7 @@ const (
 var (
 	ErrCanNotUploadFileWithUnknownSize = errors.New("proton Drive can't upload files with unknown size")
 	ErrCanNotPurgeRootDirectory        = errors.New("can't purge root directory")
+	ErrFileSHA1Missing                 = errors.New("file sha1 digest not found")
 
 	// for the auth/deauth handler
 	_mapper        configmap.Mapper
@@ -121,15 +122,7 @@ API request.
 Looks like using [OS]-drive (e.g. windows-drive) prefix will spare us from 
 getting aggressive human verification blocking.`,
 			Advanced: true,
-			Default:  getAPIOS() + "-drive@5.0.14.2",
-		}, {
-			Name: "user_agent",
-			Help: `The user agent string
-			
-The user agent string that will be sent with every API request to indicate 
-what platform our code is running on. It's an optional string.`,
-			Advanced: true,
-			Default:  "",
+			Default:  getAPIOS() + "-drive@1.0.0",
 		}, {
 			Name: "replace_existing_draft",
 			Help: `Create a new revision when filename conflict is detected
@@ -169,7 +162,6 @@ type Options struct {
 	Enc                  encoder.MultiEncoder `config:"encoding"`
 	ReportOriginalSize   bool                 `config:"original_file_size"`
 	AppVersion           string               `config:"app_version"`
-	UserAgent            string               `config:"user_agent"`
 	ReplaceExistingDraft bool                 `config:"replace_existing_draft"`
 	EnableCaching        bool                 `config:"enable_caching"`
 }
@@ -193,6 +185,8 @@ type Object struct {
 	remote       string    // The remote path (relative to the fs.root)
 	size         int64     // size of the object (on server, after encryption)
 	originalSize *int64    // size of the object (after decryption)
+	digests      *string   // object original content
+	blockSizes   []int64   // the block sizes of the encrypted file
 	modTime      time.Time // modification time of the object
 	createdTime  time.Time // creation time of the object
 	id           string    // ID of the object
@@ -286,7 +280,7 @@ func deAuthHandler() {
 func newProtonDrive(ctx context.Context, f *Fs, opt *Options, m configmap.Mapper) (*protonDriveAPI.ProtonDrive, error) {
 	config := protonDriveAPI.NewDefaultConfig()
 	config.AppVersion = opt.AppVersion
-	config.UserAgent = opt.UserAgent
+	config.UserAgent = f.ci.UserAgent // opt.UserAgent
 
 	config.ReplaceExistingDraft = opt.ReplaceExistingDraft
 	config.EnableCaching = opt.EnableCaching
@@ -517,6 +511,8 @@ func (o *Object) readMetaData(ctx context.Context, link *proton.Link) (err error
 	if fileSystemAttrs != nil {
 		o.modTime = fileSystemAttrs.ModificationTime
 		o.originalSize = &fileSystemAttrs.Size
+		o.blockSizes = fileSystemAttrs.BlockSizes
+		o.digests = &fileSystemAttrs.Digests
 	}
 
 	return nil
@@ -646,11 +642,19 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
-		// object is found
+		// object is found, we add an revision to it
 		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
 		// object not found, so we need to create it
-		return f.PutUnchecked(ctx, in, src)
+		remote := src.Remote()
+		size := src.Size()
+		modTime := src.ModTime(ctx)
+
+		obj, err := f.createObject(ctx, remote, modTime, size)
+		if err != nil {
+			return nil, err
+		}
+		return obj, obj.Update(ctx, in, src, options...)
 	default:
 		// real error caught
 		return nil, err
@@ -686,26 +690,6 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		link:         nil,
 	}
 	return obj, nil
-}
-
-// Put in to the remote path with the modTime given of the given size
-//
-// May create the object even if it returns an error - if so
-// will return the object and the error, otherwise will return
-// nil and the error
-//
-// May create duplicates or return errors if src already
-// exists.
-func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	remote := src.Remote()
-	size := src.Size()
-	modTime := src.ModTime(ctx)
-
-	obj, err := f.createObject(ctx, remote, modTime, size)
-	if err != nil {
-		return nil, err
-	}
-	return obj, obj.Update(ctx, in, src, options...)
 }
 
 // Mkdir makes the directory (container, bucket)
@@ -753,7 +737,7 @@ func (f *Fs) DirCacheFlush() {
 
 // Returns the supported hash types of the filesystem
 func (f *Fs) Hashes() hash.Set {
-	return hash.Set(hash.None)
+	return hash.Set(hash.SHA1)
 }
 
 // About gets quota information
@@ -802,7 +786,26 @@ func (o *Object) Remote() string {
 
 // Hash returns the hashes of an object
 func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
-	return "", hash.ErrUnsupported
+	if t != hash.SHA1 {
+		return "", hash.ErrUnsupported
+	}
+
+	if o.digests != nil {
+		return *o.digests, nil
+	}
+
+	// sha1 not cached
+	log.Println("sha1 not cached")
+	// we fetch and try to obtain the sha1 of the link
+	fileSystemAttrs, err := o.fs.protonDrive.GetActiveRevisionAttrsByID(ctx, o.ID())
+	if err != nil {
+		return "", err
+	}
+
+	if fileSystemAttrs == nil || fileSystemAttrs.Digests == "" {
+		return "", ErrFileSHA1Missing
+	}
+	return fileSystemAttrs.Digests, nil
 }
 
 // Size returns the size of an object in bytes
@@ -839,27 +842,6 @@ func (o *Object) Storable() bool {
 
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
-	// download and decrypt the file
-	var reader io.ReadCloser
-	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
-	var sizeOnServer int64
-	var err error
-	if err = o.fs.pacer.Call(func() (bool, error) {
-		reader, sizeOnServer, fileSystemAttrs, err = o.fs.protonDrive.DownloadFileByID(ctx, o.id)
-		return shouldRetry(ctx, err)
-	}); err != nil {
-		return nil, err
-	}
-
-	if fileSystemAttrs != nil {
-		o.originalSize = &fileSystemAttrs.Size
-		o.modTime = fileSystemAttrs.ModificationTime
-	} else {
-		fs.Debugf(o, "fileSystemAttrs is nil: using fallback size")
-		o.originalSize = &sizeOnServer
-		o.size = sizeOnServer
-	}
-
 	fs.FixRangeOption(options, *o.originalSize)
 	var offset, limit int64 = 0, -1
 	for _, option := range options { // if the caller passes in nil for options, it will become array of nil
@@ -875,12 +857,32 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 		}
 	}
 
-	retReader := io.NopCloser(reader) // the NewLimitedReadCloser will deal with the limit
-
-	// deal with offset
-	if _, err := io.CopyN(io.Discard, retReader, offset); err != nil {
+	// download and decrypt the file
+	var reader io.ReadCloser
+	var fileSystemAttrs *protonDriveAPI.FileSystemAttrs
+	var sizeOnServer int64
+	var err error
+	if err = o.fs.pacer.Call(func() (bool, error) {
+		reader, sizeOnServer, fileSystemAttrs, err = o.fs.protonDrive.DownloadFileByID(ctx, o.id, offset)
+		return shouldRetry(ctx, err)
+	}); err != nil {
 		return nil, err
 	}
+
+	if fileSystemAttrs != nil {
+		o.originalSize = &fileSystemAttrs.Size
+		o.modTime = fileSystemAttrs.ModificationTime
+		o.digests = &fileSystemAttrs.Digests
+		o.blockSizes = fileSystemAttrs.BlockSizes
+	} else {
+		fs.Debugf(o, "fileSystemAttrs is nil: using fallback size, and now digests and blocksizes available")
+		o.originalSize = &sizeOnServer
+		o.size = sizeOnServer
+		o.digests = nil
+		o.blockSizes = nil
+	}
+
+	retReader := io.NopCloser(reader) // the NewLimitedReadCloser will deal with the limit
 
 	// deal with limit
 	return readers.NewLimitedReadCloser(retReader, limit), nil
@@ -905,16 +907,19 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 	modTime := src.ModTime(ctx)
 	var linkID string
-	var originalSize int64
+	var fileSystemAttrs *proton.RevisionXAttrCommon
 	if err = o.fs.pacer.Call(func() (bool, error) {
-		linkID, originalSize, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, 0)
+		linkID, fileSystemAttrs, err = o.fs.protonDrive.UploadFileByReader(ctx, folderLinkID, leaf, modTime, in, 0)
 		return shouldRetry(ctx, err)
 	}); err != nil {
 		return err
 	}
 
 	o.id = linkID
-	o.originalSize = &originalSize
+	o.originalSize = &fileSystemAttrs.Size
+	o.modTime = modTime
+	o.blockSizes = fileSystemAttrs.BlockSizes
+	o.digests = &fileSystemAttrs.Digests
 
 	return nil
 }
@@ -1054,7 +1059,6 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 // Check the interfaces are satisfied
 var (
 	_ fs.Fs              = (*Fs)(nil)
-	_ fs.PutUncheckeder  = (*Fs)(nil)
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
