@@ -812,7 +812,7 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 	}
 
 	if fileSystemAttrs == nil || fileSystemAttrs.Digests == "" {
-		fs.Debugf(o, "file sha1 digest missing")
+		fs.Infof(o, "file sha1 digest missing")
 		return "", nil
 	}
 	return fileSystemAttrs.Digests, nil
@@ -827,7 +827,7 @@ func (o *Object) Size() int64 {
 			return *o.originalSize
 		}
 
-		fs.Debugf(o, "Original file size missing")
+		fs.Debugf(o, "Original file size is missing")
 	}
 	return o.size
 }
@@ -885,7 +885,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 		o.digests = &fileSystemAttrs.Digests
 		o.blockSizes = fileSystemAttrs.BlockSizes
 	} else {
-		fs.Debugf(o, "fileSystemAttrs is nil: using fallback size, and now digests and blocksizes available")
+		fs.Infof(o, "fileSystemAttrs is nil: using fallback size, and now digests and blocksizes available")
 		o.originalSize = &sizeOnServer
 		o.size = sizeOnServer
 		o.digests = nil
